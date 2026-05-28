@@ -248,27 +248,75 @@ def get_product_urls(store_url):
     return urls[:5]
 
 def extract_schema(url):
-    """Extract JSON-LD schema from a product page."""
-    headers = {'User-Agent': 'Mozilla/5.0 (compatible; AiReadyBot/1.0)'}
+    """Extract product data via Shopify JSON API or JSON-LD fallback."""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/html, */*',
+    }
+
+    # Method 1: Shopify product JSON API (works even with JS-rendered themes)
     try:
-        r = requests.get(url, headers=headers, timeout=12)
-        if r.status_code != 200:
-            return None
-        soup = BeautifulSoup(r.text, 'html.parser')
-        scripts = soup.find_all('script', type='application/ld+json')
-        for script in scripts:
-            try:
-                data = json.loads(script.string or '{}')
-                if isinstance(data, list):
-                    for item in data:
-                        if item.get('@type') == 'Product':
-                            return item
-                elif data.get('@type') == 'Product':
-                    return data
-            except Exception:
-                continue
+        json_url = url.rstrip('/') + '.json'
+        r = requests.get(json_url, headers=headers, timeout=12)
+        if r.status_code == 200:
+            data = r.json().get('product', {})
+            if data:
+                # Flatten Shopify product data into schema-like structure
+                variants = data.get('variants', [])
+                options = {o['name'].lower(): o.get('values', []) for o in data.get('options', [])}
+                images = data.get('images', [])
+                schema = {
+                    '@type': 'Product',
+                    'name': data.get('title', ''),
+                    'description': data.get('body_html', ''),
+                    'image': images[0].get('src') if images else None,
+                    'brand': data.get('vendor', ''),
+                    'sku': variants[0].get('sku', '') if variants else '',
+                    'offers': {
+                        'price': variants[0].get('price') if variants else None,
+                        'availability': 'InStock' if any(v.get('available') for v in variants) else 'OutOfStock',
+                    } if variants else None,
+                }
+                # Map option names to schema fields
+                for opt_name, values in options.items():
+                    if values:
+                        if 'color' in opt_name or 'colour' in opt_name:
+                            schema['color'] = values[0]
+                        elif 'size' in opt_name:
+                            schema['size'] = values[0]
+                        elif 'material' in opt_name or 'fabric' in opt_name:
+                            schema['material'] = values[0]
+                # Check for GTIN/MPN in variants
+                for v in variants:
+                    if v.get('barcode'):
+                        schema['gtin'] = v['barcode']
+                        break
+                    if v.get('sku'):
+                        schema['mpn'] = v['sku']
+                return schema
     except Exception:
         pass
+
+    # Method 2: Parse JSON-LD from static HTML
+    try:
+        r = requests.get(url, headers=headers, timeout=12)
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.text, 'html.parser')
+            scripts = soup.find_all('script', type='application/ld+json')
+            for script in scripts:
+                try:
+                    data = json.loads(script.string or '{}')
+                    if isinstance(data, list):
+                        for item in data:
+                            if item.get('@type') == 'Product':
+                                return item
+                    elif data.get('@type') == 'Product':
+                        return data
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
     return None
 
 def check_field(schema, field):
