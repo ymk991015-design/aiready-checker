@@ -173,32 +173,78 @@ document.getElementById('storeUrl').addEventListener('keydown', e => {
 """
 
 def get_product_urls(store_url):
-    """Get product URLs from Shopify sitemap."""
+    """Get product URLs from Shopify store using multiple methods."""
     base = store_url.rstrip('/')
     if not base.startswith('http'):
         base = 'https://' + base
-    headers = {'User-Agent': 'Mozilla/5.0 (compatible; AiReadyBot/1.0)'}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+    }
     urls = []
+
+    # Method 1: products.json (most reliable)
     try:
-        sitemap_url = f"{base}/sitemap_products_1.xml"
-        r = requests.get(sitemap_url, headers=headers, timeout=10)
+        r = requests.get(f"{base}/products.json?limit=5", headers=headers, timeout=12)
         if r.status_code == 200:
-            soup = BeautifulSoup(r.text, 'xml')
-            locs = soup.find_all('loc')
-            urls = [l.text.strip() for l in locs if '/products/' in l.text][:5]
+            data = r.json()
+            for p in data.get('products', []):
+                handle = p.get('handle', '')
+                if handle:
+                    urls.append(f"{base}/products/{handle}")
     except Exception:
         pass
+
+    # Method 2: product sitemap XML
     if not urls:
         try:
-            r = requests.get(f"{base}/products.json?limit=5", headers=headers, timeout=10)
+            r = requests.get(f"{base}/sitemap_products_1.xml", headers=headers, timeout=12)
             if r.status_code == 200:
-                data = r.json()
-                for p in data.get('products', []):
-                    handle = p.get('handle', '')
-                    if handle:
-                        urls.append(f"{base}/products/{handle}")
+                soup = BeautifulSoup(r.text, 'lxml-xml')
+                locs = soup.find_all('loc')
+                urls = [l.text.strip() for l in locs if '/products/' in l.text][:5]
         except Exception:
             pass
+
+    # Method 3: scrape /collections/all for product links
+    if not urls:
+        try:
+            r = requests.get(f"{base}/collections/all", headers=headers, timeout=12)
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, 'html.parser')
+                links = soup.find_all('a', href=re.compile(r'/products/[^/?#"]+$'))
+                seen = set()
+                for link in links:
+                    href = link['href']
+                    full = urljoin(base, href)
+                    if full not in seen:
+                        seen.add(full)
+                        urls.append(full)
+                    if len(urls) >= 5:
+                        break
+        except Exception:
+            pass
+
+    # Method 4: scrape homepage for product links
+    if not urls:
+        try:
+            r = requests.get(base, headers=headers, timeout=12)
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, 'html.parser')
+                links = soup.find_all('a', href=re.compile(r'/products/[^/?#"]+'))
+                seen = set()
+                for link in links:
+                    href = link['href']
+                    full = urljoin(base, href)
+                    if full not in seen:
+                        seen.add(full)
+                        urls.append(full)
+                    if len(urls) >= 5:
+                        break
+        except Exception:
+            pass
+
     return urls[:5]
 
 def extract_schema(url):
