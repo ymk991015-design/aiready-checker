@@ -112,8 +112,8 @@ HTML_TEMPLATE = """
 
 <div class="hero">
   <h1>Check your store's <em>AI Readiness</em></h1>
-  <p class="sub">Enter your Shopify store URL. We'll scan up to 20 products and show you exactly what schema fields are missing — the ones that determine whether AI engines recommend your products.</p>
-  <div class="form-box">
+  <p class="sub" id="heroSub">Enter your Shopify store URL. We'll scan up to 20 products and show you exactly what schema fields are missing — the ones that determine whether AI engines recommend your products.</p>
+  <div class="form-box" id="formBox">
     <input type="text" id="storeUrl" placeholder="yourstore.myshopify.com or yourstore.com" />
     <button class="btn" id="scanBtn" onclick="runScan()">Scan Store</button>
   </div>
@@ -122,6 +122,17 @@ HTML_TEMPLATE = """
 <div class="results" id="results"></div>
 
 <script>
+// Read shop from URL params (set by Shopify when embedded)
+const urlParams = new URLSearchParams(window.location.search);
+const shopParam = urlParams.get('shop');
+
+if (shopParam) {
+  document.getElementById('storeUrl').value = shopParam;
+  document.getElementById('heroSub').textContent = 'Scanning your store for AI readiness issues...';
+  // Auto-scan after short delay
+  setTimeout(() => runScan(), 800);
+}
+
 const FIX_HINTS = {
   'Brand': 'Shopify Admin → Products → [product] → Vendor field',
   'Aggregate Rating': 'Install a reviews app (e.g. Judge.me, Loox) and enable structured data',
@@ -857,8 +868,8 @@ def auth_callback():
     shop_tokens[shop] = access_token
     session['shop'] = shop
 
-    # Redirect to the app dashboard
-    return redirect(f'/?shop={shop}&installed=1')
+    # Redirect back into the embedded app with shop param so it auto-scans
+    return redirect(f'https://{shop}/admin/apps/aiready?shop={shop}')
 
 
 @app.route('/api/products')
