@@ -43,7 +43,6 @@ HTML_TEMPLATE = """
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>AiReady — Schema Checker</title>
-  <meta name="shopify-shop" content="{{ shop }}">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -113,29 +112,34 @@ HTML_TEMPLATE = """
 
 <div class="hero">
   <h1>Check your store's <em>AI Readiness</em></h1>
-  <p class="sub" id="heroSub">Scan your store to see exactly which product data fields are missing — the ones AI engines need to recommend your products.</p>
-  {% if shop %}
-  <div style="margin-bottom:20px;">
-    <button class="btn" id="scanBtn" onclick="runShopScan()" style="font-size:17px;padding:16px 40px;">
-      Scan My Store
-    </button>
-    <p style="margin-top:12px;font-size:13px;color:var(--muted);">{{ shop }}</p>
+  <p class="sub">Enter your Shopify store URL. We'll scan up to 20 products and show you exactly what schema fields are missing.</p>
+  <div id="shopBanner" style="display:none;margin-bottom:20px;">
+    <button class="btn" onclick="runShopScan()" style="font-size:17px;padding:16px 40px;">Scan My Store</button>
+    <p id="shopLabel" style="margin-top:12px;font-size:13px;color:var(--muted);"></p>
   </div>
-  <p style="font-size:13px;color:var(--muted);margin-bottom:8px;">Or scan a different store:</p>
-  {% endif %}
-  <div class="form-box" id="formBox">
+  <div class="form-box">
     <input type="text" id="storeUrl" placeholder="yourstore.myshopify.com or yourstore.com" />
-    <button class="btn" id="manualScanBtn" onclick="runScan()">Scan Store</button>
+    <button class="btn" id="scanBtn" onclick="runScan()">Scan Store</button>
   </div>
 </div>
 
 <div class="results" id="results"></div>
 
 <script>
-const currentShop = document.querySelector('meta[name="shopify-shop"]')?.content || '';
+// Detect shop from URL params (Shopify passes this when loading embedded app)
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  var shop = params.get('shop');
+  if (shop) {
+    var banner = document.getElementById('shopBanner');
+    var label = document.getElementById('shopLabel');
+    if (banner) banner.style.display = 'block';
+    if (label) label.textContent = shop;
+    document.getElementById('storeUrl').value = shop;
+  }
+})();
 
 function runShopScan() {
-  document.getElementById('storeUrl').value = currentShop;
   runScan();
 }
 
@@ -673,8 +677,7 @@ def score_product(schema):
 
 @app.route('/')
 def index():
-    shop = request.args.get('shop', session.get('shop', ''))
-    return render_template_string(HTML_TEMPLATE, shop=shop)
+    return render_template_string(HTML_TEMPLATE)
 
 @app.route('/scan', methods=['POST'])
 def scan():
