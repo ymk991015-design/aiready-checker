@@ -112,23 +112,30 @@ HTML_TEMPLATE = """
 
 <div class="hero">
   <h1>Check your store's <em>AI Readiness</em></h1>
-  <p class="sub" id="heroSub">Enter your Shopify store URL. We'll scan up to 20 products and show you exactly what schema fields are missing — the ones that determine whether AI engines recommend your products.</p>
+  <p class="sub" id="heroSub">Scan your store to see exactly which product data fields are missing — the ones AI engines need to recommend your products.</p>
+  {% if shop %}
+  <div style="margin-bottom:20px;">
+    <button class="btn" id="scanBtn" onclick="runShopScan()" style="font-size:17px;padding:16px 40px;">
+      Scan My Store
+    </button>
+    <p style="margin-top:12px;font-size:13px;color:var(--muted);">{{ shop }}</p>
+  </div>
+  <p style="font-size:13px;color:var(--muted);margin-bottom:8px;">Or scan a different store:</p>
+  {% endif %}
   <div class="form-box" id="formBox">
     <input type="text" id="storeUrl" placeholder="yourstore.myshopify.com or yourstore.com" />
-    <button class="btn" id="scanBtn" onclick="runScan()">Scan Store</button>
+    <button class="btn" id="manualScanBtn" onclick="runScan()">Scan Store</button>
   </div>
 </div>
 
 <div class="results" id="results"></div>
 
 <script>
-// Shop injected server-side or from URL params
-const shopParam = "{{ shop }}" || new URLSearchParams(window.location.search).get('shop');
+const currentShop = "{{ shop }}";
 
-if (shopParam && shopParam !== '') {
-  document.getElementById('storeUrl').value = shopParam;
-  document.getElementById('heroSub').textContent = 'Scanning your store for AI readiness issues...';
-  setTimeout(() => runScan(), 800);
+function runShopScan() {
+  document.getElementById('storeUrl').value = currentShop;
+  runScan();
 }
 
 const FIX_HINTS = {
