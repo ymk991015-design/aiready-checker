@@ -43,6 +43,7 @@ HTML_TEMPLATE = """
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>AiReady — Schema Checker</title>
+  <meta name="shopify-shop" content="{{ shop }}">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -131,7 +132,7 @@ HTML_TEMPLATE = """
 <div class="results" id="results"></div>
 
 <script>
-const currentShop = "{{ shop }}";
+const currentShop = document.querySelector('meta[name="shopify-shop"]')?.content || '';
 
 function runShopScan() {
   document.getElementById('storeUrl').value = currentShop;
