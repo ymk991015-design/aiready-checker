@@ -247,7 +247,7 @@ function renderResults(data) {
     }
     const escapedName = p.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
     const escapedBrand = (p.brand||'').replace(/'/g, "\\'");
-    const escapedDesc = (p.description||'').replace(/'/g, "\\'").replace(/\n/g,' ');
+    const escapedDesc = (p.description||'').replace(/'/g, "\\'").replace(/\\n/g,' ');
     html += `<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;display:flex;align-items:center;gap:12px;">
       <button class="btn-outline" style="font-size:12px;padding:7px 16px;" onclick="analyzeContent(this,'${escapedName}','${escapedBrand}','${escapedDesc}')">Analyze Content with AI</button>
       <span style="font-size:12px;color:var(--muted);">Check description quality for GEO</span>
