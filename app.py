@@ -122,14 +122,12 @@ HTML_TEMPLATE = """
 <div class="results" id="results"></div>
 
 <script>
-// Read shop from URL params (set by Shopify when embedded)
-const urlParams = new URLSearchParams(window.location.search);
-const shopParam = urlParams.get('shop');
+// Shop injected server-side or from URL params
+const shopParam = "{{ shop }}" || new URLSearchParams(window.location.search).get('shop');
 
-if (shopParam) {
+if (shopParam && shopParam !== '') {
   document.getElementById('storeUrl').value = shopParam;
   document.getElementById('heroSub').textContent = 'Scanning your store for AI readiness issues...';
-  // Auto-scan after short delay
   setTimeout(() => runScan(), 800);
 }
 
@@ -667,7 +665,8 @@ def score_product(schema):
 
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE)
+    shop = request.args.get('shop', session.get('shop', ''))
+    return render_template_string(HTML_TEMPLATE, shop=shop)
 
 @app.route('/scan', methods=['POST'])
 def scan():
