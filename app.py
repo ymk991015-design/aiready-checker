@@ -176,14 +176,46 @@ function renderResults(data) {
       <div style="margin-left:auto;"><button class="btn-outline" onclick="downloadPDF()">Download PDF Report</button></div>
     </div>`;
 
+  // Priority fixes: top 3 missing fields by weight across all products
+  const weightMap = {};
+  for (const p of data.products) {
+    for (const f of p.missing) {
+      if (!weightMap[f.label] || weightMap[f.label].weight < f.weight) {
+        weightMap[f.label] = f;
+      }
+    }
+  }
+  const priorityFixes = Object.values(weightMap).sort((a,b) => b.weight - a.weight).slice(0,3);
+
   if (s.top_issues.length) {
-    html += `<div class="top-issues"><h3>Top issues across your store</h3>`;
+    html += `<div class="top-issues">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <h3 style="margin:0;">Most common missing fields</h3>
+        <button class="btn-outline" onclick="shareScore(${s.avg_score}, '${s.store}')">Share Score</button>
+      </div>`;
     for (const issue of s.top_issues) {
       const pct = Math.round((issue.count / maxCount) * 100);
       html += `<div class="issue-row">
         <span style="min-width:180px;color:var(--text);font-size:14px;">${issue.field}</span>
         <div class="issue-bar-wrap"><div class="issue-bar" style="width:${pct}%"></div></div>
         <span class="issue-count">${issue.count} / ${s.total_products} products</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  if (priorityFixes.length) {
+    html += `<div class="top-issues" style="border-color:rgba(124,58,237,0.3);">
+      <h3 style="margin-bottom:14px;color:var(--accent-light);">Priority fixes — biggest score impact</h3>`;
+    for (const f of priorityFixes) {
+      const hint = FIX_HINTS[f.label] || 'Add this field to improve AI discoverability';
+      const pts = Math.round(f.weight);
+      html += `<div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:14px;">
+        <div style="background:rgba(124,58,237,0.15);color:var(--accent-light);border-radius:6px;padding:4px 10px;font-size:12px;font-weight:700;white-space:nowrap;">+${pts} pts</div>
+        <div>
+          <div style="font-size:14px;font-weight:600;color:#fff;margin-bottom:3px;">${f.label}</div>
+          <div style="font-size:12px;color:var(--muted);">${hint}</div>
+        </div>
       </div>`;
     }
     html += `</div>`;
@@ -204,15 +236,35 @@ function renderResults(data) {
       html += `<div class="field-item field-ok"><div class="field-dot dot-ok"></div><span>${f}</span></div>`;
     }
     for (const f of p.missing) {
-      const hint = FIX_HINTS[f] || 'Add this field to improve AI discoverability';
+      const hint = FIX_HINTS[f.label] || 'Add this field to improve AI discoverability';
       html += `<div class="field-item field-miss" onclick="toggleFix(this)">
         <div class="field-dot dot-miss"></div>
-        <div><div>${f} — missing</div><div class="fix-hint">Fix: ${hint}</div></div>
+        <div><div>${f.label} — missing</div><div class="fix-hint">Fix: ${hint}</div></div>
       </div>`;
     }
     html += `</div></div>`;
   }
+
+  // Email capture at bottom
+  html += `<div class="top-issues" style="text-align:center;padding:32px 28px;">
+    <div style="font-size:16px;font-weight:700;color:#fff;margin-bottom:6px;">Get weekly AI visibility tips</div>
+    <div style="font-size:14px;color:var(--muted);margin-bottom:20px;">We'll send you actionable GEO tips for Shopify stores — free.</div>
+    <form style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;" action="https://formspree.io/f/xqejnzbb" method="POST">
+      <input type="email" name="email" placeholder="your@email.com" required style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:12px 18px;border-radius:10px;font-size:14px;width:280px;outline:none;" />
+      <button type="submit" class="btn" style="padding:12px 24px;font-size:14px;">Subscribe</button>
+    </form>
+  </div>`;
+
   results.innerHTML = html;
+}
+
+function shareScore(score, store) {
+  const text = `My Shopify store scored ${score}/100 on AI Readiness — meaning AI engines like ChatGPT and Perplexity may not be recommending my products. Check your store free: https://aiready-checker.onrender.com`;
+  navigator.clipboard.writeText(text).then(() => {
+    alert('Score text copied! Paste it anywhere to share.');
+  }).catch(() => {
+    prompt('Copy this:', text);
+  });
 }
 
 function downloadPDF() {
@@ -284,7 +336,7 @@ function downloadPDF() {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(239, 100, 100);
-      const missingText = 'Missing: ' + p.missing.join(', ');
+      const missingText = 'Missing: ' + p.missing.map(f => f.label).join(', ');
       const lines = doc.splitTextToSize(missingText, 168);
       doc.text(lines, 22, y);
       y += lines.length * 5 + 4;
@@ -476,13 +528,15 @@ def score_product(schema):
     total_weight = sum(f['weight'] for f in REQUIRED_FIELDS.values())
     earned = 0
     present = []
-    missing = []
+    missing = []  # list of {label, weight}
     for field, meta in REQUIRED_FIELDS.items():
         if check_field(schema, field):
             earned += meta['weight']
             present.append(meta['label'])
         else:
-            missing.append(meta['label'])
+            missing.append({'label': meta['label'], 'weight': meta['weight']})
+    # Sort missing by weight descending (biggest impact first)
+    missing.sort(key=lambda x: x['weight'], reverse=True)
     score = round((earned / total_weight) * 100)
     return score, present, missing
 
@@ -506,7 +560,13 @@ def scan():
             continue
         score, present, missing = score_product(schema)
         name = schema.get('name', url.split('/')[-1].replace('-', ' ').title())
-        results.append({'url': url, 'name': name, 'score': score, 'present': present, 'missing': missing})
+        results.append({
+            'url': url,
+            'name': name,
+            'score': score,
+            'present': present,
+            'missing': missing,  # list of {label, weight}
+        })
     if not results:
         return jsonify({'error': 'Could not extract schema from product pages. The store may require JavaScript rendering.'})
 
@@ -514,9 +574,11 @@ def scan():
     avg_score = round(sum(p['score'] for p in results) / len(results))
     # Count how often each field is missing across all products
     missing_counts = {}
+    missing_weights = {}
     for p in results:
         for f in p['missing']:
-            missing_counts[f] = missing_counts.get(f, 0) + 1
+            missing_counts[f['label']] = missing_counts.get(f['label'], 0) + 1
+            missing_weights[f['label']] = f['weight']
     top_issues = sorted(missing_counts.items(), key=lambda x: x[1], reverse=True)[:5]
 
     # Parse store domain for display
