@@ -144,15 +144,15 @@ function runShopScan() {
 }
 
 const FIX_HINTS = {
-  'Brand': 'Shopify Admin → Products → [product] → Vendor field',
+  'Brand': 'Shopify Admin -> Products -> [product] -> Vendor field',
   'Aggregate Rating': 'Install a reviews app (e.g. Judge.me, Loox) and enable structured data',
-  'GTIN / Barcode': 'Shopify Admin → Products → [variant] → Barcode field (enter ISBN, UPC, GTIN, etc.)',
+  'GTIN / Barcode': 'Shopify Admin -> Products -> [variant] -> Barcode field (enter ISBN, UPC, GTIN, etc.)',
   'MPN (Manufacturer Part No)': 'Add metafield: namespace=product, key=mpn, or use SKU field',
   'Material': 'Add a product option named "Material" or add a metafield',
   'Color': 'Add a product option named "Color" or "Colour"',
   'Size': 'Add a product option named "Size"',
-  'Availability Status': 'Enable inventory tracking in Shopify Admin → Products → [variant]',
-  'Description': 'Shopify Admin → Products → [product] → Description (add detailed text)',
+  'Availability Status': 'Enable inventory tracking in Shopify Admin -> Products -> [variant]',
+  'Description': 'Shopify Admin -> Products -> [product] -> Description (add detailed text)',
   'Price / Offers': 'Ensure at least one variant has a price set',
 };
 
@@ -347,7 +347,7 @@ async function analyzeContent(btn, name, brand, description) {
       if (data.suggestions && data.suggestions.length) {
         html += `<div style="font-size:12px;color:var(--accent-light);font-weight:600;margin-bottom:6px;">Suggestions</div>`;
         for (const s of data.suggestions) {
-          html += `<div style="font-size:12px;color:#c4b5fd;margin-bottom:4px;">→ ${s}</div>`;
+          html += `<div style="font-size:12px;color:#c4b5fd;margin-bottom:4px;">-> ${s}</div>`;
         }
       }
       resultBox.innerHTML = `<div style="background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.2);border-radius:10px;padding:16px;">${html}</div>`;
