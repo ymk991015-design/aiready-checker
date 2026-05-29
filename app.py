@@ -248,11 +248,13 @@ function renderResults(data) {
     const escapedName = (p.name||'').split("'").join("").split('"').join('');
     const escapedBrand = (p.brand||'').split("'").join("");
     const escapedDesc = (p.description||'').split("'").join("").split("\n").join(" ").slice(0,200);
-    html += `<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;display:flex;align-items:center;gap:12px;">
-      <button class="btn-outline" style="font-size:12px;padding:7px 16px;" onclick="analyzeContent(this,'${escapedName}','${escapedBrand}','${escapedDesc}')">Analyze Content with AI</button>
-      <span style="font-size:12px;color:var(--muted);">Check description quality for GEO</span>
+    const missingLabels = p.missing.map(f => f.label).join('|');
+    html += `<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <button class="btn-outline" style="font-size:12px;padding:7px 16px;" onclick="analyzeContent(this,'${escapedName}','${escapedBrand}','${escapedDesc}')">Analyze Content</button>
+      <button class="btn" style="font-size:12px;padding:7px 16px;" onclick="generateDesc(this,'${escapedName}','${escapedBrand}','${escapedDesc}','${missingLabels}')">Generate Optimized Description</button>
     </div>
-    <div class="analyze-result" style="display:none;margin-top:14px;"></div>`;
+    <div class="analyze-result" style="display:none;margin-top:14px;"></div>
+    <div class="generate-result" style="display:none;margin-top:14px;"></div>`;
     html += `</div></div>`;
   }
 
@@ -324,6 +326,49 @@ async function analyzeContent(btn, name, brand, description) {
   }
   btn.disabled = false;
   btn.textContent = 'Analyze Content with AI';
+}
+
+async function generateDesc(btn, name, brand, description, missingLabels) {
+  const card = btn.closest('.product-card');
+  const resultBox = card.querySelector('.generate-result');
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+  resultBox.style.display = 'block';
+  resultBox.innerHTML = '<span class="spinner"></span> Writing optimized description...';
+
+  const missing = missingLabels ? missingLabels.split('|').filter(Boolean) : [];
+
+  try {
+    const res = await fetch('/generate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, brand, description, missing})
+    });
+    const data = await res.json();
+    if (data.error) {
+      resultBox.innerHTML = `<span style="color:var(--red);font-size:13px;">${data.error}</span>`;
+    } else {
+      resultBox.innerHTML = `
+        <div style="background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <span style="font-size:12px;font-weight:600;color:#86efac;">AI-Optimized Description</span>
+            <button class="btn-outline" style="font-size:11px;padding:4px 12px;" onclick="copyText(this, \`${data.description.split('`').join("'")}\`)">Copy</button>
+          </div>
+          <p style="font-size:14px;color:var(--text);line-height:1.7;margin:0;">${data.description}</p>
+        </div>`;
+    }
+  } catch(e) {
+    resultBox.innerHTML = `<span style="color:var(--red);font-size:13px;">Could not connect to generation service.</span>`;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Generate Optimized Description';
+}
+
+function copyText(btn, text) {
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 2000);
+  }).catch(() => prompt('Copy this:', text));
 }
 
 function downloadPDF() {
@@ -656,6 +701,56 @@ def scan():
             'top_issues': [{'field': f, 'count': c} for f, c in top_issues],
         }
     })
+
+@app.route('/generate', methods=['POST'])
+def generate():
+    data = request.get_json()
+    name = data.get('name', '')
+    brand = data.get('brand', '')
+    description = (data.get('description', '') or '')[:2000]
+    missing = data.get('missing', [])  # list of missing field labels
+
+    if not DEEPSEEK_API_KEY:
+        return jsonify({'error': 'DeepSeek API key not configured.'})
+
+    missing_str = ', '.join(missing) if missing else 'none identified'
+
+    prompt = f"""You are an e-commerce copywriter specializing in GEO (Generative Engine Optimization) — writing product descriptions that AI engines like ChatGPT, Perplexity, and Gemini can understand and recommend.
+
+Product name: {name}
+Brand: {brand}
+Current description: {description if description else '[No description provided]'}
+Missing data fields: {missing_str}
+
+Write a new, optimized product description that:
+- Is 80-150 words (ideal length for AI engines)
+- Naturally includes: material/fabric, color options, size info, use cases, target audience
+- Uses clear, specific language (not vague marketing fluff)
+- Mentions the brand name naturally
+- Answers the question "who is this product for and why should they buy it?"
+
+Return ONLY the description text. No labels, no JSON, no explanations."""
+
+    try:
+        r = requests.post(
+            'https://api.deepseek.com/chat/completions',
+            headers={
+                'Authorization': f'Bearer {DEEPSEEK_API_KEY}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': 'deepseek-chat',
+                'messages': [{'role': 'user', 'content': prompt}],
+                'temperature': 0.7,
+                'max_tokens': 300
+            },
+            timeout=20
+        )
+        description_out = r.json()['choices'][0]['message']['content'].strip()
+        return jsonify({'description': description_out})
+    except Exception as e:
+        return jsonify({'error': f'Generation failed: {str(e)}'})
+
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
