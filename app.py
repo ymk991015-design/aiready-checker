@@ -3,9 +3,12 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import re
+import os
 from urllib.parse import urljoin, urlparse
 
 app = Flask(__name__)
+
+DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
 
 REQUIRED_FIELDS = {
     "name":              {"label": "Product Name",              "weight": 5},
@@ -242,6 +245,14 @@ function renderResults(data) {
         <div><div>${f.label} — missing</div><div class="fix-hint">Fix: ${hint}</div></div>
       </div>`;
     }
+    const escapedName = p.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const escapedBrand = (p.brand||'').replace(/'/g, "\\'");
+    const escapedDesc = (p.description||'').replace(/'/g, "\\'").replace(/\n/g,' ');
+    html += `<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;display:flex;align-items:center;gap:12px;">
+      <button class="btn-outline" style="font-size:12px;padding:7px 16px;" onclick="analyzeContent(this,'${escapedName}','${escapedBrand}','${escapedDesc}')">Analyze Content with AI</button>
+      <span style="font-size:12px;color:var(--muted);">Check description quality for GEO</span>
+    </div>
+    <div class="analyze-result" style="display:none;margin-top:14px;"></div>`;
     html += `</div></div>`;
   }
 
@@ -265,6 +276,54 @@ function shareScore(score, store) {
   }).catch(() => {
     prompt('Copy this:', text);
   });
+}
+
+async function analyzeContent(btn, name, brand, description) {
+  const card = btn.closest('.product-card');
+  const resultBox = card.querySelector('.analyze-result');
+  btn.disabled = true;
+  btn.textContent = 'Analyzing...';
+  resultBox.style.display = 'block';
+  resultBox.innerHTML = '<span class="spinner"></span> Running GEO content analysis...';
+
+  try {
+    const res = await fetch('/analyze', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, brand, description})
+    });
+    const data = await res.json();
+    if (data.error) {
+      resultBox.innerHTML = `<span style="color:var(--red);font-size:13px;">${data.error}</span>`;
+    } else {
+      const scoreCol = data.content_score >= 70 ? '#22c55e' : data.content_score >= 40 ? '#f59e0b' : '#ef4444';
+      let html = `<div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;flex-wrap:wrap;">
+        <div>
+          <span style="font-size:22px;font-weight:800;color:${scoreCol}">${data.content_score}/100</span>
+          <span style="font-size:12px;color:var(--muted);margin-left:8px;">Content GEO Score</span>
+        </div>
+        <div style="font-size:12px;color:var(--muted);">${data.word_count || 0} words in description</div>
+      </div>`;
+      if (data.issues && data.issues.length) {
+        html += `<div style="margin-bottom:10px;">`;
+        for (const issue of data.issues) {
+          html += `<div style="font-size:12px;color:#fca5a5;margin-bottom:4px;">⚠ ${issue}</div>`;
+        }
+        html += `</div>`;
+      }
+      if (data.suggestions && data.suggestions.length) {
+        html += `<div style="font-size:12px;color:var(--accent-light);font-weight:600;margin-bottom:6px;">Suggestions</div>`;
+        for (const s of data.suggestions) {
+          html += `<div style="font-size:12px;color:#c4b5fd;margin-bottom:4px;">→ ${s}</div>`;
+        }
+      }
+      resultBox.innerHTML = `<div style="background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.2);border-radius:10px;padding:16px;">${html}</div>`;
+    }
+  } catch(e) {
+    resultBox.innerHTML = `<span style="color:var(--red);font-size:13px;">Could not connect to analysis service.</span>`;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Analyze Content with AI';
 }
 
 function downloadPDF() {
@@ -566,6 +625,8 @@ def scan():
             'score': score,
             'present': present,
             'missing': missing,  # list of {label, weight}
+            'description': re.sub(r'<[^>]+>', '', schema.get('description', '') or '')[:500],
+            'brand': schema.get('brand', '') or schema.get('vendor', ''),
         })
     if not results:
         return jsonify({'error': 'Could not extract schema from product pages. The store may require JavaScript rendering.'})
@@ -595,6 +656,58 @@ def scan():
             'top_issues': [{'field': f, 'count': c} for f, c in top_issues],
         }
     })
+
+@app.route('/analyze', methods=['POST'])
+def analyze():
+    data = request.get_json()
+    name = data.get('name', '')
+    brand = data.get('brand', '')
+    description = (data.get('description', '') or '')[:2000]
+
+    if not DEEPSEEK_API_KEY:
+        return jsonify({'error': 'DeepSeek API key not configured.'})
+
+    prompt = f"""You are a GEO (Generative Engine Optimization) expert for e-commerce.
+
+Analyze this Shopify product description for AI engine discoverability. AI engines like ChatGPT, Perplexity, and Gemini need rich, specific descriptions to understand and recommend products.
+
+Product name: {name}
+Brand: {brand}
+Description: {description if description else '[No description provided]'}
+
+Return ONLY a valid JSON object with these exact keys:
+- "content_score": integer 0-100 (how well-optimized for AI engines)
+- "word_count": integer (word count of the description)
+- "issues": array of up to 4 short strings describing problems
+- "suggestions": array of up to 4 short strings with specific improvements
+
+No explanation, no markdown, just the JSON object."""
+
+    try:
+        r = requests.post(
+            'https://api.deepseek.com/chat/completions',
+            headers={
+                'Authorization': f'Bearer {DEEPSEEK_API_KEY}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': 'deepseek-chat',
+                'messages': [{'role': 'user', 'content': prompt}],
+                'temperature': 0.2,
+                'max_tokens': 400
+            },
+            timeout=20
+        )
+        content = r.json()['choices'][0]['message']['content'].strip()
+        # Strip markdown code fences if present
+        if content.startswith('```'):
+            content = re.sub(r'^```[a-z]*\n?', '', content)
+            content = re.sub(r'\n?```$', '', content)
+        result = json.loads(content)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': f'Analysis failed: {str(e)}'})
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
