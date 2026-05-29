@@ -341,7 +341,8 @@ function renderResults(data) {
     html += `<div class="card">
       <div class="card-header">
         <div class="card-title">Most common issues across your store</div>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${s.has_token ? `<button class="btn-primary" onclick="bulkFix(this)">Fix All Products</button>` : ''}
           <button class="btn-secondary" onclick="shareScore(${s.avg_score},'${s.store}')">Share Score</button>
           <button class="btn-secondary" onclick="downloadPDF()">Download PDF</button>
         </div>
@@ -355,7 +356,14 @@ function renderResults(data) {
         <span class="issue-count">${issue.count} of ${s.total_products} products</span>
       </div>`;
     }
-    html += `</div></div>`;
+    html += `</div>
+      <div id="bulkProgress" style="display:none;padding:12px 20px;border-top:1px solid var(--border);">
+        <div style="font-size:13px;color:var(--text-sub);margin-bottom:8px;">Generating and saving descriptions...</div>
+        <div style="background:#F1F1F1;border-radius:4px;height:8px;overflow:hidden;">
+          <div id="bulkBar" style="background:var(--green);height:8px;border-radius:4px;width:0%;transition:width 0.3s;"></div>
+        </div>
+      </div>
+    </div>`;
   }
 
   // Priority fixes card
@@ -411,10 +419,14 @@ function renderResults(data) {
       const hint = FIX_HINTS[f.label] || 'Add this field to improve AI discoverability';
       html += `<span class="chip chip-miss" title="${hint}">${f.label} - missing</span>`;
     }
+    const pid = p.product_id || '';
+    const pvendor = (p.vendor||'').split("'").join("");
+    const hasToken = data.summary.has_token && pid;
     html += `</div>
         <div class="detail-actions">
           <button class="btn-secondary" onclick="event.stopPropagation();analyzeContent(this,'${en}','${eb}','${ed}')">Analyze Content</button>
-          <button class="btn-primary" onclick="event.stopPropagation();generateDesc(this,'${en}','${eb}','${ed}','${ml}')">Generate Optimized Description</button>
+          <button class="btn-primary" onclick="event.stopPropagation();generateDesc(this,'${en}','${eb}','${ed}','${ml}')">Generate AI Description</button>
+          ${hasToken && !p.vendor ? `<button class="btn-secondary" onclick="event.stopPropagation();autoFillBrand(this,'${pid}','${en}','${s.store}')">Auto-fill Brand</button>` : ''}
         </div>
         <div class="analyze-result" style="display:none;margin-top:12px;"></div>
         <div class="generate-result" style="display:none;margin-top:12px;"></div>
@@ -527,21 +539,132 @@ async function generateDesc(btn, name, brand, description, missingLabels) {
     if (data.error) {
       resultBox.innerHTML = `<div class="error-banner">${data.error}</div>`;
     } else {
-      const descText = data.description.split('`').join("'");
+      // Get product_id and shop from the row context
+      const row = btn.closest('tr');
+      const idx = row ? row.id.replace('detail-','') : '';
+      const p = lastData && lastData.products ? lastData.products[parseInt(idx)] : null;
+      const productId = p ? p.product_id : '';
+      const shop = lastData && lastData.summary ? lastData.summary.store : '';
+      const hasToken = lastData && lastData.summary && lastData.summary.has_token;
+
+      const safeDesc = data.description.replace(/'/g,'').replace(/`/g,'');
+      const saveBtn = (hasToken && productId)
+        ? `<button class="btn-primary" style="font-size:12px;padding:5px 14px;" onclick="saveToShopify(this,'${productId}','${shop}',this.closest('.ai-result').querySelector('.ai-result-body').textContent)">Save to Shopify</button>`
+        : '';
       resultBox.innerHTML = `
         <div class="ai-result">
           <div class="ai-result-header">
             <span>AI-Optimized Description</span>
-            <button class="btn-secondary" style="font-size:12px;padding:5px 12px;" onclick="copyText(this,'${descText.split("'").join('')}')">Copy</button>
+            <div style="display:flex;gap:8px;">
+              <button class="btn-secondary" style="font-size:12px;padding:5px 12px;" onclick="copyText(this,this.closest('.ai-result').querySelector('.ai-result-body').textContent)">Copy</button>
+              ${saveBtn}
+            </div>
           </div>
           <div class="ai-result-body">${data.description}</div>
         </div>`;
     }
   } catch(e) {
-    resultBox.innerHTML = `<span style="color:var(--red);font-size:13px;">Could not connect to generation service.</span>`;
+    resultBox.innerHTML = `<div class="error-banner">Could not connect to generation service.</div>`;
   }
   btn.disabled = false;
-  btn.textContent = 'Generate Optimized Description';
+  btn.textContent = 'Generate AI Description';
+}
+
+async function saveToShopify(btn, productId, shop, description) {
+  if (!productId || !shop) { alert('Store not connected. Install the app via Shopify to enable saving.'); return; }
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/update_product', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({product_id: productId, shop, description})
+    });
+    const data = await res.json();
+    if (data.success) {
+      btn.textContent = 'Saved!';
+      btn.style.background = 'var(--green)';
+    } else {
+      btn.textContent = 'Failed';
+      alert(data.error || 'Could not save to Shopify.');
+    }
+  } catch(e) {
+    btn.textContent = 'Error';
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = 'Save to Shopify'; btn.style.background = ''; }, 3000);
+}
+
+async function autoFillBrand(btn, productId, productName, shop) {
+  btn.disabled = true;
+  btn.textContent = 'Filling...';
+  // Extract brand from product name (first word or phrase before dash/comma)
+  const brandGuess = productName.split('-')[0].split(',')[0].trim().split(' ').slice(0,2).join(' ');
+  try {
+    const res = await fetch('/api/update_vendor', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({product_id: productId, shop, vendor: brandGuess})
+    });
+    const data = await res.json();
+    if (data.success) {
+      btn.textContent = 'Done - ' + brandGuess;
+      btn.style.color = 'var(--green)';
+    } else {
+      btn.textContent = 'Failed';
+    }
+  } catch(e) {
+    btn.textContent = 'Error';
+  }
+}
+
+async function bulkFix(btn) {
+  if (!lastData || !lastData.summary.has_token) {
+    alert('Connect your Shopify store first by installing the app.');
+    return;
+  }
+  const shop = lastData.summary.store;
+  const products = lastData.products.filter(p => p.product_id && p.missing.length > 0);
+  if (!products.length) { alert('No products need fixing.'); return; }
+
+  btn.disabled = true;
+  const total = products.length;
+  let done = 0;
+
+  const progressEl = document.getElementById('bulkProgress');
+  if (progressEl) progressEl.style.display = 'block';
+
+  for (const p of products) {
+    const progressBar = document.getElementById('bulkBar');
+    if (progressBar) progressBar.style.width = Math.round((done/total)*100) + '%';
+
+    // Generate description
+    try {
+      const genRes = await fetch('/generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          name: p.name,
+          brand: p.brand || '',
+          description: p.description || '',
+          missing: p.missing.map(f => f.label)
+        })
+      });
+      const genData = await genRes.json();
+      if (genData.description && p.product_id) {
+        await fetch('/api/update_product', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({product_id: p.product_id, shop, description: genData.description})
+        });
+      }
+    } catch(e) {}
+    done++;
+  }
+
+  if (progressEl) progressEl.style.display = 'none';
+  btn.disabled = false;
+  btn.textContent = 'Fix All Products';
+  alert(`Done! Updated ${done} products in Shopify.`);
 }
 
 function copyText(btn, text) {
@@ -753,6 +876,7 @@ def extract_schema(url):
                 images = data.get('images', [])
                 schema = {
                     '@type': 'Product',
+                    '_shopify_id': str(data.get('id', '')),
                     'name': data.get('title', ''),
                     'description': data.get('body_html', ''),
                     'image': images[0].get('src') if images else None,
@@ -863,9 +987,11 @@ def scan():
             'name': name,
             'score': score,
             'present': present,
-            'missing': missing,  # list of {label, weight}
+            'missing': missing,
             'description': re.sub(r'<[^>]+>', '', schema.get('description', '') or '')[:500],
             'brand': schema.get('brand', '') or schema.get('vendor', ''),
+            'product_id': schema.get('_shopify_id', ''),
+            'vendor': schema.get('brand', ''),
         })
     if not results:
         return jsonify({'error': 'Could not extract schema from product pages. The store may require JavaScript rendering.'})
@@ -886,6 +1012,9 @@ def scan():
     parsed = urlparse(store_url if store_url.startswith('http') else 'https://' + store_url)
     store_domain = parsed.netloc or store_url
 
+    # Check if this shop has an authenticated token
+    has_token = store_domain in shop_tokens
+
     return jsonify({
         'products': results,
         'summary': {
@@ -893,6 +1022,7 @@ def scan():
             'avg_score': avg_score,
             'total_products': len(results),
             'top_issues': [{'field': f, 'count': c} for f, c in top_issues],
+            'has_token': has_token,
         }
     })
 
@@ -956,4 +1086,158 @@ def analyze():
     if not DEEPSEEK_API_KEY:
         return jsonify({'error': 'DeepSeek API key not configured.'})
 
-  
+    prompt = f"""You are a GEO (Generative Engine Optimization) expert for e-commerce.
+
+Analyze this Shopify product description for AI engine discoverability. AI engines like ChatGPT, Perplexity, and Gemini need rich, specific descriptions to understand and recommend products.
+
+Product name: {name}
+Brand: {brand}
+Description: {description if description else '[No description provided]'}
+
+Return ONLY a valid JSON object with these exact keys:
+- "content_score": integer 0-100 (how well-optimized for AI engines)
+- "word_count": integer (word count of the description)
+- "issues": array of up to 4 short strings describing problems
+- "suggestions": array of up to 4 short strings with specific improvements
+
+No explanation, no markdown, just the JSON object."""
+
+    try:
+        r = requests.post(
+            'https://api.deepseek.com/chat/completions',
+            headers={
+                'Authorization': f'Bearer {DEEPSEEK_API_KEY}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': 'deepseek-chat',
+                'messages': [{'role': 'user', 'content': prompt}],
+                'temperature': 0.2,
+                'max_tokens': 400
+            },
+            timeout=20
+        )
+        content = r.json()['choices'][0]['message']['content'].strip()
+        # Strip markdown code fences if present
+        if content.startswith('```'):
+            content = re.sub(r'^```[a-z]*\n?', '', content)
+            content = re.sub(r'\n?```$', '', content)
+        result = json.loads(content)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': f'Analysis failed: {str(e)}'})
+
+
+@app.route('/install')
+def install():
+    shop = request.args.get('shop', '').strip()
+    if not shop:
+        return 'Missing shop parameter.', 400
+    if not shop.endswith('.myshopify.com'):
+        shop = shop + '.myshopify.com'
+    state = base64.b64encode(os.urandom(16)).decode('utf-8')
+    session['oauth_state'] = state
+    params = {
+        'client_id': SHOPIFY_CLIENT_ID,
+        'scope': SHOPIFY_SCOPES,
+        'redirect_uri': 'https://aiready-checker.onrender.com/auth/callback',
+        'state': state,
+    }
+    auth_url = f"https://{shop}/admin/oauth/authorize?{urlencode(params)}"
+    return redirect(auth_url)
+
+
+@app.route('/auth/callback')
+def auth_callback():
+    shop = request.args.get('shop', '')
+    code = request.args.get('code', '')
+    state = request.args.get('state', '')
+
+    # Verify state
+    if state != session.get('oauth_state', ''):
+        return 'Invalid state parameter.', 403
+
+    # Exchange code for access token
+    token_url = f"https://{shop}/admin/oauth/access_token"
+    resp = requests.post(token_url, json={
+        'client_id': SHOPIFY_CLIENT_ID,
+        'client_secret': SHOPIFY_CLIENT_SECRET,
+        'code': code,
+    })
+    if resp.status_code != 200:
+        return 'Failed to get access token.', 400
+
+    access_token = resp.json().get('access_token')
+    shop_tokens[shop] = access_token
+    session['shop'] = shop
+
+    # Redirect back into the embedded app with shop param so it auto-scans
+    return redirect(f'https://{shop}/admin/apps/aiready?shop={shop}')
+
+
+@app.route('/api/products')
+def api_products():
+    """Fetch products directly from Shopify Admin API using stored token."""
+    shop = request.args.get('shop', session.get('shop', ''))
+    if not shop or shop not in shop_tokens:
+        return jsonify({'error': 'Not authenticated. Please install the app first.'}), 401
+    token = shop_tokens[shop]
+    resp = requests.get(
+        f"https://{shop}/admin/api/2024-01/products.json?limit=20",
+        headers={'X-Shopify-Access-Token': token}
+    )
+    if resp.status_code != 200:
+        return jsonify({'error': 'Failed to fetch products from Shopify.'}), 400
+    return jsonify(resp.json())
+
+
+@app.route('/api/update_vendor', methods=['POST'])
+def update_vendor():
+    """Update product vendor/brand via Shopify Admin API."""
+    data = request.get_json()
+    shop = data.get('shop', session.get('shop', ''))
+    product_id = data.get('product_id')
+    vendor = data.get('vendor', '')
+
+    if not shop or shop not in shop_tokens:
+        return jsonify({'error': 'Not authenticated.'}), 401
+    if not product_id:
+        return jsonify({'error': 'Missing product_id.'}), 400
+
+    token = shop_tokens[shop]
+    resp = requests.put(
+        f"https://{shop}/admin/api/2024-01/products/{product_id}.json",
+        headers={'X-Shopify-Access-Token': token, 'Content-Type': 'application/json'},
+        json={'product': {'id': product_id, 'vendor': vendor}}
+    )
+    if resp.status_code != 200:
+        return jsonify({'error': 'Failed to update vendor.'}), 400
+    return jsonify({'success': True})
+
+
+@app.route('/api/update_product', methods=['POST'])
+def update_product():
+    """Update a product description via Shopify Admin API."""
+    data = request.get_json()
+    shop = data.get('shop', session.get('shop', ''))
+    product_id = data.get('product_id')
+    new_description = data.get('description', '')
+
+    if not shop or shop not in shop_tokens:
+        return jsonify({'error': 'Not authenticated.'}), 401
+    if not product_id:
+        return jsonify({'error': 'Missing product_id.'}), 400
+
+    token = shop_tokens[shop]
+    resp = requests.put(
+        f"https://{shop}/admin/api/2024-01/products/{product_id}.json",
+        headers={'X-Shopify-Access-Token': token, 'Content-Type': 'application/json'},
+        json={'product': {'id': product_id, 'body_html': new_description}}
+    )
+    if resp.status_code != 200:
+        return jsonify({'error': 'Failed to update product.'}), 400
+    return jsonify({'success': True})
+
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5001)
