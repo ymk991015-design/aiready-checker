@@ -1,14 +1,24 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, redirect, session
 import requests
 from bs4 import BeautifulSoup
 import json
 import re
 import os
-from urllib.parse import urljoin, urlparse
+import hmac
+import hashlib
+import base64
+from urllib.parse import urljoin, urlparse, urlencode
 
 app = Flask(__name__)
+app.secret_key = os.environ.get('FLASK_SECRET', 'aiready-secret-key-2025')
 
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
+SHOPIFY_CLIENT_ID = os.environ.get('SHOPIFY_CLIENT_ID', '')
+SHOPIFY_CLIENT_SECRET = os.environ.get('SHOPIFY_CLIENT_SECRET', '')
+SHOPIFY_SCOPES = 'read_products,write_products'
+
+# In-memory token store (fine for MVP; replace with DB later)
+shop_tokens = {}
 
 REQUIRED_FIELDS = {
     "name":              {"label": "Product Name",              "weight": 5},
@@ -802,6 +812,93 @@ No explanation, no markdown, just the JSON object."""
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': f'Analysis failed: {str(e)}'})
+
+
+@app.route('/install')
+def install():
+    shop = request.args.get('shop', '').strip()
+    if not shop:
+        return 'Missing shop parameter.', 400
+    if not shop.endswith('.myshopify.com'):
+        shop = shop + '.myshopify.com'
+    state = base64.b64encode(os.urandom(16)).decode('utf-8')
+    session['oauth_state'] = state
+    params = {
+        'client_id': SHOPIFY_CLIENT_ID,
+        'scope': SHOPIFY_SCOPES,
+        'redirect_uri': 'https://aiready-checker.onrender.com/auth/callback',
+        'state': state,
+    }
+    auth_url = f"https://{shop}/admin/oauth/authorize?{urlencode(params)}"
+    return redirect(auth_url)
+
+
+@app.route('/auth/callback')
+def auth_callback():
+    shop = request.args.get('shop', '')
+    code = request.args.get('code', '')
+    state = request.args.get('state', '')
+
+    # Verify state
+    if state != session.get('oauth_state', ''):
+        return 'Invalid state parameter.', 403
+
+    # Exchange code for access token
+    token_url = f"https://{shop}/admin/oauth/access_token"
+    resp = requests.post(token_url, json={
+        'client_id': SHOPIFY_CLIENT_ID,
+        'client_secret': SHOPIFY_CLIENT_SECRET,
+        'code': code,
+    })
+    if resp.status_code != 200:
+        return 'Failed to get access token.', 400
+
+    access_token = resp.json().get('access_token')
+    shop_tokens[shop] = access_token
+    session['shop'] = shop
+
+    # Redirect to the app dashboard
+    return redirect(f'/?shop={shop}&installed=1')
+
+
+@app.route('/api/products')
+def api_products():
+    """Fetch products directly from Shopify Admin API using stored token."""
+    shop = request.args.get('shop', session.get('shop', ''))
+    if not shop or shop not in shop_tokens:
+        return jsonify({'error': 'Not authenticated. Please install the app first.'}), 401
+    token = shop_tokens[shop]
+    resp = requests.get(
+        f"https://{shop}/admin/api/2024-01/products.json?limit=20",
+        headers={'X-Shopify-Access-Token': token}
+    )
+    if resp.status_code != 200:
+        return jsonify({'error': 'Failed to fetch products from Shopify.'}), 400
+    return jsonify(resp.json())
+
+
+@app.route('/api/update_product', methods=['POST'])
+def update_product():
+    """Update a product description via Shopify Admin API."""
+    data = request.get_json()
+    shop = data.get('shop', session.get('shop', ''))
+    product_id = data.get('product_id')
+    new_description = data.get('description', '')
+
+    if not shop or shop not in shop_tokens:
+        return jsonify({'error': 'Not authenticated.'}), 401
+    if not product_id:
+        return jsonify({'error': 'Missing product_id.'}), 400
+
+    token = shop_tokens[shop]
+    resp = requests.put(
+        f"https://{shop}/admin/api/2024-01/products/{product_id}.json",
+        headers={'X-Shopify-Access-Token': token, 'Content-Type': 'application/json'},
+        json={'product': {'id': product_id, 'body_html': new_description}}
+    )
+    if resp.status_code != 200:
+        return jsonify({'error': 'Failed to update product.'}), 400
+    return jsonify({'success': True})
 
 
 if __name__ == '__main__':
