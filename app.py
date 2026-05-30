@@ -17,6 +17,8 @@ RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 CRON_SECRET = os.environ.get('CRON_SECRET', 'aiready-cron-2025')
 DB_PATH = os.environ.get('DB_PATH', '/tmp/aiready.db')
 
+FREE_LIMIT = 5  # free AI actions per shop
+
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute('''CREATE TABLE IF NOT EXISTS subscriptions (
@@ -28,6 +30,36 @@ def init_db():
         created_at TEXT DEFAULT (datetime('now')),
         UNIQUE(email, shop)
     )''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS usage_counts (
+        shop TEXT PRIMARY KEY,
+        count INTEGER DEFAULT 0,
+        updated_at TEXT DEFAULT (datetime('now'))
+    )''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS paid_shops (
+        shop TEXT PRIMARY KEY,
+        paypal_txn_id TEXT,
+        paid_at TEXT DEFAULT (datetime('now'))
+    )''')
+    conn.commit()
+    conn.close()
+
+def is_paid(shop):
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute('SELECT 1 FROM paid_shops WHERE shop=?', (shop,)).fetchone()
+    conn.close()
+    return bool(row)
+
+def get_usage(shop):
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute('SELECT count FROM usage_counts WHERE shop=?', (shop,)).fetchone()
+    conn.close()
+    return row[0] if row else 0
+
+def increment_usage(shop):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('''INSERT INTO usage_counts (shop, count) VALUES (?, 1)
+        ON CONFLICT(shop) DO UPDATE SET count=count+1, updated_at=datetime('now')
+    ''', (shop,))
     conn.commit()
     conn.close()
 
@@ -217,6 +249,24 @@ HTML_TEMPLATE = """
     .email-input { border: 1px solid #444; background: #2A2A2A; color: #fff; padding: 9px 14px; border-radius: 6px; font-size: 14px; width: 260px; outline: none; }
     .email-input::placeholder { color: #666; }
 
+    /* USAGE BADGE */
+    .usage-badge { display:inline-flex; align-items:center; gap:6px; background:var(--yellow-bg); border:1px solid var(--yellow-border); color:var(--yellow); border-radius:20px; padding:4px 12px; font-size:12px; font-weight:600; }
+    .usage-badge.paid { background:var(--green-bg); border-color:var(--green-border); color:var(--green); }
+
+    /* UPGRADE MODAL */
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center; }
+    .modal-overlay.visible { display:flex; }
+    .modal-box { background:#fff; border-radius:12px; padding:32px; max-width:420px; width:90%; text-align:center; box-shadow:0 8px 40px rgba(0,0,0,0.18); }
+    .modal-icon { font-size:36px; margin-bottom:12px; }
+    .modal-title { font-size:20px; font-weight:700; color:var(--text); margin-bottom:8px; }
+    .modal-sub { font-size:14px; color:var(--text-sub); margin-bottom:24px; line-height:1.6; }
+    .modal-price { font-size:32px; font-weight:800; color:var(--green); margin-bottom:4px; }
+    .modal-price-sub { font-size:13px; color:var(--text-sub); margin-bottom:24px; }
+    .modal-features { text-align:left; background:var(--green-bg); border:1px solid var(--green-border); border-radius:8px; padding:14px 18px; margin-bottom:24px; }
+    .modal-feature { font-size:13px; color:#005E45; padding:3px 0; }
+    .modal-close { margin-top:14px; font-size:13px; color:var(--text-hint); cursor:pointer; }
+    .modal-close:hover { color:var(--text-sub); }
+
     @media(max-width: 640px) {
       .metrics { grid-template-columns: 1fr; }
       .issue-name { min-width: 120px; }
@@ -341,7 +391,21 @@ function renderResults(data) {
   }
   const priorityFixes = Object.values(weightMap).sort((a,b) => b.weight - a.weight).slice(0,3);
 
-  let html = `
+  // Usage badge (fetch async, inject after render)
+  fetch('/api/usage?shop=' + encodeURIComponent(s.store))
+    .then(r => r.json())
+    .then(u => {
+      const el = document.getElementById('usageBadge');
+      if (!el) return;
+      if (u.paid) {
+        el.innerHTML = '<span class="usage-badge paid">&#10003; Unlimited plan</span>';
+      } else {
+        const rem = u.remaining;
+        el.innerHTML = `<span class="usage-badge">${rem} free action${rem===1?'':'s'} remaining &mdash; <a href="#" onclick="showUpgradeModal('${s.store}');return false;" style="color:var(--yellow);text-decoration:underline;">Upgrade $9</a></span>`;
+      }
+    }).catch(() => {});
+
+  let html = `<div id="usageBadge" style="margin-bottom:12px;"></div>
   <div class="metrics">
     <div class="metric-card">
       <div class="metric-value">${s.total_products}</div>
@@ -552,13 +616,19 @@ async function generateDesc(btn, name, brand, description, missingLabels) {
 
   const missing = missingLabels ? missingLabels.split('|').filter(Boolean) : [];
 
+  const shop = lastData && lastData.summary ? lastData.summary.store : '';
   try {
     const res = await fetch('/generate', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name, brand, description, missing})
+      body: JSON.stringify({name, brand, description, missing, shop})
     });
     const data = await res.json();
+    if (data.error === 'LIMIT_REACHED') {
+      resultBox.style.display = 'none';
+      showUpgradeModal(shop);
+      btn.disabled = false; btn.textContent = 'Generate AI Description'; return;
+    }
     if (data.error) {
       resultBox.innerHTML = `<div class="error-banner">${data.error}</div>`;
     } else {
@@ -604,6 +674,10 @@ async function saveToShopify(btn, productId, shop, description) {
       body: JSON.stringify({product_id: productId, shop, description})
     });
     const data = await res.json();
+    if (data.error === 'LIMIT_REACHED') {
+      btn.disabled = false; btn.textContent = 'Save to Shopify';
+      showUpgradeModal(shop); return;
+    }
     if (data.success) {
       btn.textContent = 'Saved!';
       btn.style.background = 'var(--green)';
@@ -689,6 +763,46 @@ async function bulkFix(btn) {
   btn.textContent = 'Fix All Products';
   alert(`Done! Updated ${done} products in Shopify.`);
 }
+
+function showUpgradeModal(shop) {
+  document.getElementById('paypalShop').value = shop || '';
+  document.getElementById('modalStep1').style.display = 'block';
+  document.getElementById('modalStep2').style.display = 'none';
+  document.getElementById('upgradeModal').classList.add('visible');
+}
+function closeUpgradeModal() {
+  document.getElementById('upgradeModal').classList.remove('visible');
+}
+function showPaidStep() {
+  setTimeout(() => {
+    document.getElementById('modalStep1').style.display = 'none';
+    document.getElementById('modalStep2').style.display = 'block';
+  }, 1500);
+}
+async function submitUnlockRequest() {
+  const email = document.getElementById('unlockEmail').value.trim();
+  const shop = document.getElementById('paypalShop').value;
+  const msg = document.getElementById('unlockMsg');
+  if (!email) { alert('Please enter your PayPal email.'); return; }
+  try {
+    const res = await fetch('/request-unlock', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email, shop})
+    });
+    const data = await res.json();
+    msg.style.display = 'block';
+    msg.style.color = 'var(--green)';
+    msg.textContent = 'Request received! Your store will be unlocked within a few hours.';
+  } catch(e) {
+    msg.style.display = 'block';
+    msg.style.color = 'var(--red)';
+    msg.textContent = 'Error sending request. Please email us directly.';
+  }
+}
+document.addEventListener('click', e => {
+  if (e.target.id === 'upgradeModal') closeUpgradeModal();
+});
 
 async function subscribe(shop) {
   const email = document.getElementById('subEmail').value.trim();
@@ -822,6 +936,35 @@ document.getElementById('storeUrl').addEventListener('keydown', e => {
   if (e.key === 'Enter') runScan();
 });
 </script>
+
+<!-- UPGRADE MODAL -->
+<div class="modal-overlay" id="upgradeModal">
+  <div class="modal-box">
+    <div class="modal-icon">&#128274;</div>
+    <div class="modal-title">You've used your 5 free actions</div>
+    <div class="modal-sub">Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.</div>
+    <div class="modal-price">$9</div>
+    <div class="modal-price-sub">one-time payment &mdash; unlimited forever</div>
+    <div class="modal-features">
+      <div class="modal-feature">&#10003; &nbsp; Unlimited AI description generation</div>
+      <div class="modal-feature">&#10003; &nbsp; Save directly to Shopify</div>
+      <div class="modal-feature">&#10003; &nbsp; Bulk fix all products at once</div>
+      <div class="modal-feature">&#10003; &nbsp; Weekly score reports via email</div>
+    </div>
+    <div id="modalStep1">
+      <a href="https://paypal.me/MingkunYang/9" target="_blank" class="btn-primary" style="display:block;padding:14px;font-size:15px;text-decoration:none;" onclick="showPaidStep()">Pay $9 via PayPal &rarr;</a>
+    </div>
+    <div id="modalStep2" style="display:none;margin-top:16px;">
+      <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Enter your PayPal email so we can verify and unlock your store:</p>
+      <input type="email" id="unlockEmail" class="scan-input" placeholder="your@paypal.email" style="margin-bottom:8px;" />
+      <button class="btn-primary" style="width:100%;padding:12px;" onclick="submitUnlockRequest()">Confirm &amp; Unlock</button>
+      <div id="unlockMsg" style="margin-top:10px;font-size:13px;display:none;"></div>
+    </div>
+    <input type="hidden" id="paypalShop" value="">
+    <div class="modal-close" onclick="closeUpgradeModal()">Maybe later</div>
+  </div>
+</div>
+
 </body>
 </html>
 """
@@ -1071,13 +1214,54 @@ def scan():
         }
     })
 
+@app.route('/api/usage', methods=['GET'])
+def api_usage():
+    shop = request.args.get('shop', '').strip().lower()
+    if not shop:
+        return jsonify({'error': 'shop required'}), 400
+    paid = is_paid(shop)
+    used = get_usage(shop)
+    remaining = None if paid else max(0, FREE_LIMIT - used)
+    return jsonify({'shop': shop, 'paid': paid, 'used': used, 'remaining': remaining, 'limit': FREE_LIMIT})
+
+
+@app.route('/paypal/ipn', methods=['POST'])
+def paypal_ipn():
+    """Verify PayPal IPN and mark shop as paid."""
+    raw = request.get_data(as_text=True)
+    # Step 1: post back to PayPal for verification
+    verify_url = 'https://ipnpb.paypal.com/cgi-bin/webscr'
+    verify_resp = requests.post(verify_url, data='cmd=_notify-validate&' + raw,
+                                headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                                timeout=10)
+    if verify_resp.text != 'VERIFIED':
+        return 'INVALID', 400
+    params = dict(p.split('=', 1) for p in raw.split('&') if '=' in p)
+    from urllib.parse import unquote_plus
+    payment_status = unquote_plus(params.get('payment_status', ''))
+    txn_id = unquote_plus(params.get('txn_id', ''))
+    shop = unquote_plus(params.get('custom', '')).strip().lower()
+    if payment_status == 'Completed' and shop:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute('INSERT OR REPLACE INTO paid_shops (shop, paypal_txn_id) VALUES (?, ?)', (shop, txn_id))
+        conn.commit()
+        conn.close()
+    return 'OK', 200
+
+
 @app.route('/generate', methods=['POST'])
 def generate():
     data = request.get_json()
     name = data.get('name', '')
     brand = data.get('brand', '')
     description = (data.get('description', '') or '')[:2000]
-    missing = data.get('missing', [])  # list of missing field labels
+    missing = data.get('missing', [])
+    shop = data.get('shop', '').strip().lower()
+
+    if shop and not is_paid(shop):
+        used = get_usage(shop)
+        if used >= FREE_LIMIT:
+            return jsonify({'error': 'LIMIT_REACHED', 'used': used, 'limit': FREE_LIMIT}), 402
 
     if not DEEPSEEK_API_KEY:
         return jsonify({'error': 'DeepSeek API key not configured.'})
@@ -1116,6 +1300,8 @@ Return ONLY the description text. No labels, no JSON, no explanations."""
             timeout=20
         )
         description_out = r.json()['choices'][0]['message']['content'].strip()
+        if shop:
+            increment_usage(shop)
         return jsonify({'description': description_out})
     except Exception as e:
         return jsonify({'error': f'Generation failed: {str(e)}'})
@@ -1273,6 +1459,12 @@ def update_product():
     if not product_id:
         return jsonify({'error': 'Missing product_id.'}), 400
 
+    shop_key = shop.strip().lower()
+    if not is_paid(shop_key):
+        used = get_usage(shop_key)
+        if used >= FREE_LIMIT:
+            return jsonify({'error': 'LIMIT_REACHED', 'used': used, 'limit': FREE_LIMIT}), 402
+
     token = shop_tokens[shop]
     resp = requests.put(
         f"https://{shop}/admin/api/2024-01/products/{product_id}.json",
@@ -1281,7 +1473,62 @@ def update_product():
     )
     if resp.status_code != 200:
         return jsonify({'error': 'Failed to update product.'}), 400
+    increment_usage(shop_key)
     return jsonify({'success': True})
+
+
+ADMIN_SECRET = os.environ.get('ADMIN_SECRET', 'aiready-admin-2025')
+
+@app.route('/request-unlock', methods=['POST'])
+def request_unlock():
+    """User submits PayPal email after paying. Stored for admin review."""
+    data = request.get_json()
+    email = data.get('email', '').strip().lower()
+    shop = data.get('shop', '').strip().lower()
+    if not email or not shop:
+        return jsonify({'error': 'Email and shop required.'}), 400
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('''CREATE TABLE IF NOT EXISTS unlock_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT, shop TEXT, created_at TEXT DEFAULT (datetime('now'))
+    )''')
+    conn.execute('INSERT INTO unlock_requests (email, shop) VALUES (?, ?)', (email, shop))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+
+@app.route('/admin/unlock', methods=['POST'])
+def admin_unlock():
+    """Admin endpoint to manually unlock a shop after verifying payment."""
+    secret = request.headers.get('X-Admin-Secret', '')
+    if secret != ADMIN_SECRET:
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.get_json()
+    shop = data.get('shop', '').strip().lower()
+    if not shop:
+        return jsonify({'error': 'shop required'}), 400
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('INSERT OR REPLACE INTO paid_shops (shop, paypal_txn_id) VALUES (?, ?)', (shop, 'manual'))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True, 'shop': shop})
+
+
+@app.route('/admin/requests', methods=['GET'])
+def admin_requests():
+    """List pending unlock requests."""
+    secret = request.headers.get('X-Admin-Secret', '')
+    if secret != ADMIN_SECRET:
+        return jsonify({'error': 'Unauthorized'}), 401
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('''CREATE TABLE IF NOT EXISTS unlock_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT, shop TEXT, created_at TEXT DEFAULT (datetime('now'))
+    )''')
+    rows = conn.execute('SELECT id, email, shop, created_at FROM unlock_requests ORDER BY created_at DESC').fetchall()
+    conn.close()
+    return jsonify([{'id': r[0], 'email': r[1], 'shop': r[2], 'created_at': r[3]} for r in rows])
 
 
 @app.route('/subscribe', methods=['POST'])
@@ -1373,4 +1620,28 @@ def run_weekly_scan():
             # Send via Resend
             if RESEND_API_KEY:
                 requests.post(
-                    'https://api.resend
+                    'https://api.resend.com/emails',
+                    headers={'Authorization': f'Bearer {RESEND_API_KEY}', 'Content-Type': 'application/json'},
+                    json={
+                        'from': 'AiReady <reports@aiready.io>',
+                        'to': [email],
+                        'subject': f'Weekly AI Readiness Report: {shop} scored {avg}/100',
+                        'html': html_body,
+                    },
+                    timeout=10
+                )
+
+            # Update last_score
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute('UPDATE subscriptions SET last_score=?, last_scanned=datetime("now") WHERE id=?', (avg, sub_id))
+            conn.commit()
+            conn.close()
+            sent += 1
+        except Exception:
+            continue
+
+    return jsonify({'sent': sent, 'total': len(subs)})
+
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5001)
