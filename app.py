@@ -7,10 +7,31 @@ import os
 import hmac
 import hashlib
 import base64
+import sqlite3
 from urllib.parse import urljoin, urlparse, urlencode
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET', 'aiready-secret-key-2025')
+
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+CRON_SECRET = os.environ.get('CRON_SECRET', 'aiready-cron-2025')
+DB_PATH = os.environ.get('DB_PATH', '/tmp/aiready.db')
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('''CREATE TABLE IF NOT EXISTS subscriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL,
+        shop TEXT NOT NULL,
+        last_score INTEGER DEFAULT 0,
+        last_scanned TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(email, shop)
+    )''')
+    conn.commit()
+    conn.close()
+
+init_db()
 
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
 SHOPIFY_CLIENT_ID = os.environ.get('SHOPIFY_CLIENT_ID', '')
@@ -437,13 +458,15 @@ function renderResults(data) {
   html += `</tbody></table></div>`;
 
   // Email capture
+  const shopDomain = s.store || '';
   html += `<div class="email-card">
-    <h3>Get weekly AI visibility tips</h3>
-    <p>Actionable GEO tips for Shopify stores - free.</p>
-    <form class="email-row" action="https://formspree.io/f/xqejnzbb" method="POST">
-      <input type="email" name="email" class="email-input" placeholder="your@email.com" required />
-      <button type="submit" class="btn-primary">Subscribe</button>
-    </form>
+    <h3>Get your weekly AI Readiness Report</h3>
+    <p>We scan your store every week and email you the score + what to fix.</p>
+    <div class="email-row">
+      <input type="email" id="subEmail" class="email-input" placeholder="your@email.com" />
+      <button class="btn-primary" onclick="subscribe('${shopDomain}')">Get Weekly Report</button>
+    </div>
+    <div id="subMsg" style="margin-top:10px;font-size:13px;color:#95BF47;display:none;">Subscribed! You'll get your first report within a week.</div>
   </div>`;
 
   results.innerHTML = html;
@@ -665,6 +688,28 @@ async function bulkFix(btn) {
   btn.disabled = false;
   btn.textContent = 'Fix All Products';
   alert(`Done! Updated ${done} products in Shopify.`);
+}
+
+async function subscribe(shop) {
+  const email = document.getElementById('subEmail').value.trim();
+  if (!email) { alert('Please enter your email.'); return; }
+  if (!shop) { alert('Please scan a store first.'); return; }
+  try {
+    const res = await fetch('/subscribe', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email, shop})
+    });
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById('subMsg').style.display = 'block';
+      document.getElementById('subEmail').value = '';
+    } else {
+      alert(data.error || 'Subscription failed.');
+    }
+  } catch(e) {
+    alert('Could not connect. Please try again.');
+  }
 }
 
 function copyText(btn, text) {
@@ -1239,5 +1284,93 @@ def update_product():
     return jsonify({'success': True})
 
 
-if __name__ == '__main__':
-    app.run(debug=True, port=5001)
+@app.route('/subscribe', methods=['POST'])
+def subscribe():
+    data = request.get_json()
+    email = data.get('email', '').strip().lower()
+    shop = data.get('shop', '').strip().lower()
+    if not email or not shop:
+        return jsonify({'error': 'Email and shop required.'}), 400
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute('INSERT OR IGNORE INTO subscriptions (email, shop) VALUES (?, ?)', (email, shop))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/run-weekly-scan', methods=['POST'])
+def run_weekly_scan():
+    """Called by external cron job weekly. Scans all subscribed shops and emails reports."""
+    secret = request.headers.get('X-Cron-Secret', '')
+    if secret != CRON_SECRET:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    conn = sqlite3.connect(DB_PATH)
+    subs = conn.execute('SELECT id, email, shop, last_score FROM subscriptions').fetchall()
+    conn.close()
+
+    sent = 0
+    for sub_id, email, shop, last_score in subs:
+        try:
+            # Scan the store
+            urls = get_product_urls(shop)
+            if not urls:
+                continue
+            results = []
+            for url in urls[:10]:
+                schema = extract_schema(url)
+                if not schema:
+                    continue
+                score, present, missing = score_product(schema)
+                name = schema.get('name', url.split('/')[-1].replace('-', ' ').title())
+                results.append({'name': name, 'score': score, 'missing': [f['label'] for f in missing]})
+            if not results:
+                continue
+
+            avg = round(sum(r['score'] for r in results) / len(results))
+            delta = avg - last_score if last_score else 0
+            delta_str = f"+{delta}" if delta > 0 else str(delta)
+
+            # Build email HTML
+            rows = ''.join(
+                f"<tr><td style='padding:8px;border-bottom:1px solid #eee;'>{r['name'][:50]}</td>"
+                f"<td style='padding:8px;border-bottom:1px solid #eee;color:{'#008060' if r['score']>=70 else '#B98900' if r['score']>=40 else '#D72C0D'};font-weight:600;'>{r['score']}/100</td>"
+                f"<td style='padding:8px;border-bottom:1px solid #eee;font-size:12px;color:#6D7175;'>{', '.join(r['missing'][:3])}</td></tr>"
+                for r in results
+            )
+            html_body = f"""
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:600px;margin:0 auto;">
+  <div style="background:#1A1A1A;padding:20px 24px;border-radius:8px 8px 0 0;">
+    <span style="color:#fff;font-size:18px;font-weight:700;">Ai<span style="color:#95BF47;">Ready</span></span>
+    <span style="color:#999;font-size:13px;margin-left:12px;">Weekly AI Readiness Report</span>
+  </div>
+  <div style="background:#fff;border:1px solid #E4E5E7;border-top:none;padding:24px;border-radius:0 0 8px 8px;">
+    <h2 style="font-size:20px;color:#202223;margin:0 0 4px;">{shop}</h2>
+    <p style="color:#6D7175;font-size:14px;margin:0 0 20px;">
+      Average score: <strong style="color:{'#008060' if avg>=70 else '#B98900' if avg>=40 else '#D72C0D'};">{avg}/100</strong>
+      {f' &nbsp; <span style="color:{"#008060" if delta>0 else "#D72C0D"};">({delta_str} from last week)</span>' if last_score else ''}
+    </p>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr>
+        <th style="text-align:left;padding:8px;background:#F6F6F7;color:#6D7175;font-size:11px;text-transform:uppercase;">Product</th>
+        <th style="text-align:left;padding:8px;background:#F6F6F7;color:#6D7175;font-size:11px;text-transform:uppercase;">Score</th>
+        <th style="text-align:left;padding:8px;background:#F6F6F7;color:#6D7175;font-size:11px;text-transform:uppercase;">Top Missing Fields</th>
+      </tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+    <div style="margin-top:24px;text-align:center;">
+      <a href="https://aiready-checker.onrender.com/?shop={shop}" style="background:#008060;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px;">View Full Report</a>
+    </div>
+    <p style="margin-top:20px;font-size:12px;color:#8C9196;text-align:center;">
+      You're receiving this because you subscribed at aiready-checker.onrender.com
+    </p>
+  </div>
+</div>"""
+
+            # Send via Resend
+            if RESEND_API_KEY:
+                requests.post(
+                    'https://api.resend
