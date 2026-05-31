@@ -2008,36 +2008,3 @@ def run_weekly_scan():
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
-diness Checker for Shopify &mdash; &copy; 2025 AiReady</div>
-  <div class="zh">Shopify AI &#21487;&#35222;&#24615;&#26816;&#27979;&#24037;&#20855; &mdash; &copy; 2025 AiReady</div>
-</footer>
-
-<script>
-function goScan() {
-  var url = document.getElementById('heroUrl').value.trim();
-  if (url) {
-    window.location.href = '/app?url=' + encodeURIComponent(url);
-  } else {
-    window.location.href = '/app';
-  }
-}
-document.getElementById('heroUrl').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') goScan();
-});
-function toggleLang() {
-  document.body.classList.toggle('lang-zh');
-}
-</script>
-</body>
-</html>
-"""
-
-@app.route('/')
-def index():
-    return render_template_string(LANDING_TEMPLATE)
-
-@app.route('/app')
-def app_page():
-    url_param = request.args.get('url', '')
-    return render_template_string(HTML_TEMPLATE, prefill_url=url_param)
-
