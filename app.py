@@ -284,26 +284,8 @@ HTML_TEMPLATE = """
 <div class="page">
 
   <div class="page-header">
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:4px;">
-      <div class="page-title">AI Readiness Scanner</div>
-      <a href="/" style="font-size:13px;color:var(--text-sub);text-decoration:none;">&larr; Home</a>
-    </div>
+    <div class="page-title">AI Readiness Scanner</div>
     <div class="page-subtitle">Check how visible your Shopify products are to AI engines like ChatGPT, Perplexity, and Gemini.</div>
-  </div>
-
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;">
-    <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:flex;gap:10px;align-items:flex-start;">
-      <div style="font-size:18px;line-height:1;">&#128202;</div>
-      <div><div style="font-size:13px;font-weight:600;margin-bottom:2px;color:var(--text);">Score every product</div><div style="font-size:12px;color:var(--text-sub);">13 fields checked. See what&apos;s missing and the point impact.</div></div>
-    </div>
-    <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:flex;gap:10px;align-items:flex-start;">
-      <div style="font-size:18px;line-height:1;">&#129302;</div>
-      <div><div style="font-size:13px;font-weight:600;margin-bottom:2px;color:var(--text);">Generate AI descriptions</div><div style="font-size:12px;color:var(--text-sub);">One-click GEO copy that AI engines can read and recommend.</div></div>
-    </div>
-    <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:flex;gap:10px;align-items:flex-start;">
-      <div style="font-size:18px;line-height:1;">&#128279;</div>
-      <div><div style="font-size:13px;font-weight:600;margin-bottom:2px;color:var(--text);">Save to Shopify</div><div style="font-size:12px;color:var(--text-sub);">Connect your store and push fixes without leaving this page.</div></div>
-    </div>
   </div>
 
   <div id="shopBanner" class="shop-banner">
@@ -1178,30 +1160,25 @@ LANDING_TEMPLATE = """
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>AiReady - Is Your Shopify Store Visible to AI?</title>
-  <meta name="description" content="Free tool to check how visible your Shopify products are to ChatGPT, Perplexity, and Gemini. Get your AI Readiness Score in 30 seconds."/>
+  <meta name="description" content="Free tool to check how visible your Shopify products are to ChatGPT, Perplexity, and Gemini."/>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --green: #008060; --green-dark: #006E52; --green-bg: #F1F8F5;
-      --text: #1A1A1A; --text-sub: #555; --border: #E4E5E7;
-      --yellow: #F5A623; --red: #D72C0D;
-      --page-bg: #FAFAFA;
+      --green: #008060; --green-dark: #006E52; --green-bg: #F1F8F5; --green-border: #AEE9D1;
+      --text: #1A1A1A; --text-sub: #555; --border: #E4E5E7; --page-bg: #FAFAFA;
+      --yellow: #F5A623; --red: #D72C0D; --yellow-bg: #FFF5EA; --yellow-border: #F1C84B;
     }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif; color: var(--text); background: #fff; line-height: 1.6; }
-
-    /* NAV */
     nav { display:flex; align-items:center; justify-content:space-between; padding:16px 40px; border-bottom:1px solid var(--border); background:#fff; position:sticky; top:0; z-index:100; }
     .nav-logo { font-size:18px; font-weight:800; letter-spacing:-0.5px; }
     .nav-logo span { color:#95BF47; }
     .nav-right { display:flex; align-items:center; gap:16px; }
     .lang-btn { font-size:13px; color:var(--text-sub); background:none; border:1px solid var(--border); padding:5px 12px; border-radius:20px; cursor:pointer; }
     .lang-btn:hover { border-color:#aaa; }
-    .btn-nav { background:var(--green); color:#fff; border:none; padding:8px 20px; border-radius:6px; font-size:14px; font-weight:600; cursor:pointer; text-decoration:none; }
+    .btn-nav { background:var(--green); color:#fff; border:none; padding:8px 20px; border-radius:6px; font-size:14px; font-weight:600; cursor:pointer; text-decoration:none; display:inline-block; }
     .btn-nav:hover { background:var(--green-dark); }
-
-    /* HERO */
     .hero { max-width:760px; margin:0 auto; padding:72px 24px 60px; text-align:center; }
-    .hero-badge { display:inline-block; background:#FFF5EA; color:#B95000; border:1px solid #F1C84B; border-radius:20px; padding:5px 14px; font-size:12px; font-weight:600; margin-bottom:20px; letter-spacing:0.3px; }
+    .hero-badge { display:inline-block; background:var(--yellow-bg); color:#B95000; border:1px solid var(--yellow-border); border-radius:20px; padding:5px 14px; font-size:12px; font-weight:600; margin-bottom:20px; }
     .hero h1 { font-size:clamp(28px,5vw,52px); font-weight:800; line-height:1.15; letter-spacing:-1px; margin-bottom:18px; }
     .hero h1 em { color:var(--green); font-style:normal; }
     .hero-sub { font-size:18px; color:var(--text-sub); max-width:560px; margin:0 auto 36px; line-height:1.6; }
@@ -1211,38 +1188,66 @@ LANDING_TEMPLATE = """
     .btn-hero { background:var(--green); color:#fff; border:none; padding:13px 28px; border-radius:8px; font-size:15px; font-weight:700; cursor:pointer; white-space:nowrap; }
     .btn-hero:hover { background:var(--green-dark); }
     .hero-hint { font-size:13px; color:#999; }
-
-    /* LOGOS */
-    .logos { text-align:center; padding:32px 24px; border-top:1px solid var(--border); border-bottom:1px solid var(--border); background:var(--page-bg); }
-    .logos-label { font-size:12px; color:#aaa; text-transform:uppercase; letter-spacing:1px; margin-bottom:16px; }
+    .logos { text-align:center; padding:28px 24px; border-top:1px solid var(--border); border-bottom:1px solid var(--border); background:var(--page-bg); }
+    .logos-label { font-size:12px; color:#aaa; text-transform:uppercase; letter-spacing:1px; margin-bottom:14px; }
     .logos-row { display:flex; justify-content:center; align-items:center; gap:32px; flex-wrap:wrap; }
-    .logo-item { font-size:15px; font-weight:700; color:#bbb; letter-spacing:-0.3px; }
-
-    /* PROBLEM */
-    .section { max-width:900px; margin:0 auto; padding:72px 24px; }
+    .logo-item { font-size:15px; font-weight:700; color:#bbb; }
+    .section { max-width:900px; margin:0 auto; padding:64px 24px; }
     .section-label { font-size:12px; font-weight:700; color:var(--green); text-transform:uppercase; letter-spacing:1.5px; margin-bottom:10px; }
     .section h2 { font-size:clamp(22px,3.5vw,36px); font-weight:800; letter-spacing:-0.5px; margin-bottom:16px; line-height:1.2; }
     .section-sub { font-size:16px; color:var(--text-sub); max-width:600px; margin-bottom:48px; line-height:1.7; }
+    .bg-gray { background:var(--page-bg); border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
     .stat-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
-    .stat-card { background:var(--page-bg); border:1px solid var(--border); border-radius:12px; padding:24px; text-align:center; }
+    .stat-card { background:#fff; border:1px solid var(--border); border-radius:12px; padding:24px; text-align:center; }
     .stat-num { font-size:36px; font-weight:800; color:var(--green); margin-bottom:6px; }
     .stat-label { font-size:14px; color:var(--text-sub); line-height:1.5; }
-
-    /* HOW IT WORKS */
-    .how-section { background:var(--page-bg); border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
-    .steps { display:grid; grid-template-columns:repeat(3,1fr); gap:32px; margin-top:0; }
+    .steps { display:grid; grid-template-columns:repeat(3,1fr); gap:32px; }
     .step { text-align:center; padding:8px; }
     .step-num { width:40px; height:40px; background:var(--green); color:#fff; border-radius:50%; font-size:16px; font-weight:800; display:flex; align-items:center; justify-content:center; margin:0 auto 16px; }
     .step h3 { font-size:16px; font-weight:700; margin-bottom:8px; }
     .step p { font-size:14px; color:var(--text-sub); line-height:1.6; }
-
-    /* FEATURES */
     .features { display:grid; grid-template-columns:repeat(2,1fr); gap:20px; }
     .feature-card { border:1px solid var(--border); border-radius:12px; padding:24px; }
     .feature-icon { font-size:24px; margin-bottom:12px; }
     .feature-card h3 { font-size:15px; font-weight:700; margin-bottom:6px; }
     .feature-card p { font-size:14px; color:var(--text-sub); line-height:1.6; }
-
+    /* BEFORE/AFTER */
+    .ba-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+    .ba-card { border-radius:12px; padding:24px; }
+    .ba-before { background:#FFF4F4; border:1px solid #FD5749; }
+    .ba-after { background:var(--green-bg); border:1px solid var(--green-border); }
+    .ba-score { font-size:42px; font-weight:800; margin-bottom:4px; }
+    .ba-score-before { color:var(--red); }
+    .ba-score-after { color:var(--green); }
+    .ba-label { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.8px; margin-bottom:16px; }
+    .ba-label-before { color:var(--red); }
+    .ba-label-after { color:var(--green); }
+    .ba-row { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid rgba(0,0,0,0.06); font-size:13px; }
+    .ba-row:last-child { border-bottom:none; }
+    .ba-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    .dot-red { background:var(--red); }
+    .dot-green { background:var(--green); }
+    /* MOCKUP */
+    .mockup-wrap { background:#F6F6F7; border:1px solid var(--border); border-radius:12px; overflow:hidden; margin-top:40px; }
+    .mockup-bar { background:#1A1A1A; padding:12px 20px; display:flex; align-items:center; gap:10px; }
+    .mockup-dot { width:10px; height:10px; border-radius:50%; }
+    .mockup-body { padding:20px; }
+    .mockup-metric-row { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:14px; }
+    .mockup-metric { background:#fff; border:1px solid var(--border); border-radius:8px; padding:12px 14px; }
+    .mockup-metric-val { font-size:22px; font-weight:700; }
+    .mockup-metric-lbl { font-size:11px; color:var(--text-sub); }
+    .mockup-row { background:#fff; border:1px solid var(--border); border-radius:8px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:13px; }
+    .pill { padding:3px 10px; border-radius:20px; font-size:12px; font-weight:600; }
+    .pill-red { background:#FFF4F4; color:var(--red); border:1px solid #FD5749; }
+    .pill-yellow { background:var(--yellow-bg); color:#B95000; border:1px solid var(--yellow-border); }
+    .pill-green { background:var(--green-bg); color:var(--green); border:1px solid var(--green-border); }
+    /* TESTIMONIALS */
+    .testi-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
+    .testi-card { background:#fff; border:1px solid var(--border); border-radius:12px; padding:24px; }
+    .testi-stars { color:#F5A623; font-size:14px; margin-bottom:12px; }
+    .testi-text { font-size:14px; color:var(--text); line-height:1.7; margin-bottom:16px; font-style:italic; }
+    .testi-author { font-size:13px; font-weight:600; color:var(--text); }
+    .testi-store { font-size:12px; color:var(--text-sub); }
     /* PRICING */
     .pricing { display:grid; grid-template-columns:repeat(2,1fr); gap:20px; max-width:640px; margin:0 auto; }
     .price-card { border:2px solid var(--border); border-radius:12px; padding:28px; }
@@ -1252,29 +1257,30 @@ LANDING_TEMPLATE = """
     .price-desc { font-size:13px; color:var(--text-sub); margin-bottom:20px; }
     .price-features { list-style:none; margin-bottom:24px; }
     .price-features li { font-size:14px; color:var(--text); padding:5px 0; }
-    .price-features li::before { content:"\\2713  "; color:var(--green); font-weight:700; }
+    .price-features li::before { content:"\2713  "; color:var(--green); font-weight:700; }
     .btn-price { display:block; text-align:center; padding:11px; border-radius:8px; font-size:14px; font-weight:700; text-decoration:none; cursor:pointer; border:none; }
     .btn-price-free { background:#fff; color:var(--text); border:2px solid var(--border); }
     .btn-price-paid { background:var(--green); color:#fff; }
     .btn-price-free:hover { border-color:#aaa; }
     .btn-price-paid:hover { background:var(--green-dark); }
-
-    /* CTA BAND */
+    /* FAQ */
+    .faq-item { border-bottom:1px solid var(--border); padding:20px 0; }
+    .faq-q { font-size:15px; font-weight:600; cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:16px; }
+    .faq-q:hover { color:var(--green); }
+    .faq-icon { font-size:18px; color:var(--text-sub); flex-shrink:0; transition:transform 0.2s; }
+    .faq-a { font-size:14px; color:var(--text-sub); line-height:1.7; margin-top:12px; display:none; }
+    .faq-item.open .faq-a { display:block; }
+    .faq-item.open .faq-icon { transform:rotate(45deg); }
     .cta-band { background:#1A1A1A; padding:64px 24px; text-align:center; }
     .cta-band h2 { font-size:clamp(22px,3vw,34px); font-weight:800; color:#fff; margin-bottom:12px; }
     .cta-band p { color:#999; font-size:16px; margin-bottom:32px; }
-
-    /* FOOTER */
     footer { padding:24px 40px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; font-size:13px; color:#aaa; flex-wrap:wrap; gap:8px; }
-
-    /* LANG */
     .zh { display:none; }
     body.lang-zh .zh { display:block; }
     body.lang-zh .en { display:none; }
-
     @media(max-width:640px) {
       nav { padding:14px 20px; }
-      .stat-grid, .steps, .features, .pricing { grid-template-columns:1fr; }
+      .stat-grid, .steps, .features, .ba-grid, .testi-grid, .pricing { grid-template-columns:1fr; }
       .hero-input-row { flex-direction:column; }
     }
   </style>
@@ -1290,7 +1296,7 @@ LANDING_TEMPLATE = """
     </button>
     <a href="/app" class="btn-nav">
       <span class="en">Free Scan &rarr;</span>
-      <span class="zh">为我扫描 &rarr;</span>
+      <span class="zh">免费扫描 &rarr;</span>
     </a>
   </div>
 </nav>
@@ -1298,29 +1304,26 @@ LANDING_TEMPLATE = """
 <!-- HERO -->
 <section class="hero">
   <div class="hero-badge en">NEW &mdash; AI Search Optimization for Shopify</div>
-  <div class="hero-badge zh">新工具 &mdash; Shopify AI ʁ&#25索优化</div>
-
+  <div class="hero-badge zh">新工具 &mdash; Shopify AI 搜索优化</div>
   <h1 class="en">Is your store <em>invisible</em><br/>to ChatGPT?</h1>
-  <h1 class="zh">你的店都对 ChatGPT <em>隐形</em>吗？</h1>
-
-  <p class="hero-sub en">AI engines are replacing Google search. If your Shopify products lack structured data, they won&apos;t get recommended. Check your store free in 30 seconds.</p>
-  <p class="hero-sub zh">AI 引&#25擎;正在取代 Google &#25索;。如果你的 Shopify 产品缺少结构化数据，AI 就不会推荐你的产品。30 秒中于亮扫描。</p>
-
+  <h1 class="zh">你的店铺对 ChatGPT <em>隐形</em>吗？</h1>
+  <p class="hero-sub en">AI engines are replacing Google search. If your Shopify products lack structured data, they won't get recommended. Check your store free in 30 seconds.</p>
+  <p class="hero-sub zh">AI 引擎正在取代 Google 搜索。如果你的 Shopify 产品缺少结构化数据，AI 就不会推荐你的产品。30 秒免费扫描，立即找出问题。</p>
   <div class="hero-input-row">
     <input type="text" class="hero-input" id="heroUrl" placeholder="yourstore.myshopify.com" />
     <button class="btn-hero" onclick="goScan()">
       <span class="en">Scan Free</span>
-      <span class="zh">为我扫描</span>
+      <span class="zh">免费扫描</span>
     </button>
   </div>
   <p class="hero-hint en">No signup required &mdash; scan up to 20 products for free</p>
-  <p class="hero-hint zh">无需注册 &mdash; 为我扫描最多 20 个产品</p>
+  <p class="hero-hint zh">无需注册 &mdash; 免费扫描最多 20 个产品</p>
 </section>
 
 <!-- AI LOGOS -->
 <div class="logos">
   <div class="logos-label en">Optimize for AI engines</div>
-  <div class="logos-label zh">为以下 AI 引&#25擎;优化</div>
+  <div class="logos-label zh">为以下 AI 引擎优化</div>
   <div class="logos-row">
     <div class="logo-item">ChatGPT</div>
     <div class="logo-item">Perplexity</div>
@@ -1334,186 +1337,320 @@ LANDING_TEMPLATE = """
 <section class="section">
   <div class="section-label en">The Problem</div>
   <div class="section-label zh">问题所在</div>
-  <h2 class="en">AI is the new search.<br/>Most stores aren&apos;t ready.</h2>
-  <h2 class="zh">AI 就是新的&#25索;引&#25擎;。大多数店都没有准好。</h2>
-  <p class="section-sub en">When someone asks ChatGPT &quot;what&apos;s the best yoga mat under $50&quot;, it recommends products with rich, structured data. Missing brand, material, reviews, or GTIN means your products get skipped.</p>
-  <p class="section-sub zh">当用户问 ChatGPT “50 综事内最好的&#29瑜;作坡”，AI 会推荐拨有值的结构化数据的产品。缺少 Brand、Material、謨价，你的产品就会被跳过。</p>
+  <h2 class="en">AI is the new search.<br/>Most stores aren't ready.</h2>
+  <h2 class="zh">AI 就是新的搜索引擎。<br/>大多数店铺没有准备好。</h2>
+  <p class="section-sub en">When someone asks ChatGPT "what's the best yoga mat under $50", it recommends products with rich, structured data. Missing brand, material, reviews, or GTIN means your products get skipped.</p>
+  <p class="section-sub zh">当用户问 ChatGPT「50 美元内最好的瑜伽垫」，AI 会推荐拥有完整结构化数据的产品。缺少品牌、材质、评价或条形码，你的产品就会被跳过。</p>
   <div class="stat-grid">
     <div class="stat-card">
       <div class="stat-num">58%</div>
       <div class="stat-label en">of product searches now start on AI engines, not Google</div>
-      <div class="stat-label zh">产品&#25索;引工工工工工 AI 引&#25擎;</div>
+      <div class="stat-label zh">产品搜索已转移到 AI 引擎</div>
     </div>
     <div class="stat-card">
       <div class="stat-num">73%</div>
       <div class="stat-label en">of Shopify stores score below 50/100 on AI readiness</div>
-      <div class="stat-label zh">Shopify 店都 AI 可視性&#25타分不达 50/100</div>
+      <div class="stat-label zh">Shopify 店铺 AI 可见性低于 50/100</div>
     </div>
     <div class="stat-card">
       <div class="stat-num">3x</div>
       <div class="stat-label en">more AI recommendations for stores with complete structured data</div>
-      <div class="stat-label zh">完整结构化数据憲店获得 3倒更多 AI 推荐</div>
+      <div class="stat-label zh">完整数据的店铺获得 3 倍 AI 推荐</div>
     </div>
   </div>
 </section>
 
+<!-- BEFORE / AFTER -->
+<div class="bg-gray">
+<section class="section">
+  <div class="section-label en">Before &amp; After</div>
+  <div class="section-label zh">优化前后对比</div>
+  <h2 class="en">See what a fix actually looks like</h2>
+  <h2 class="zh">看看优化前后的真实差距</h2>
+  <p class="section-sub en">Same product. After filling in missing structured data fields, the AI Readiness Score jumped from 23 to 87.</p>
+  <p class="section-sub zh">同一个产品，补全缺失的结构化数据字段后，AI 可见性评分从 23 跳升至 87。</p>
+  <div class="ba-grid">
+    <div class="ba-card ba-before">
+      <div class="ba-score ba-score-before">23<span style="font-size:18px;font-weight:400;">/100</span></div>
+      <div class="ba-label ba-label-before en">Before &mdash; Not AI Ready</div>
+      <div class="ba-label ba-label-before zh">优化前 &mdash; AI 不可见</div>
+      <div class="ba-row"><div class="ba-dot dot-green"></div><span class="en">Product Name</span><span class="zh">产品名称</span></div>
+      <div class="ba-row"><div class="ba-dot dot-green"></div><span class="en">Price</span><span class="zh">价格</span></div>
+      <div class="ba-row"><div class="ba-dot dot-red"></div><span style="color:var(--red)" class="en">Brand &mdash; missing</span><span style="color:var(--red)" class="zh">品牌 &mdash; 缺失</span></div>
+      <div class="ba-row"><div class="ba-dot dot-red"></div><span style="color:var(--red)" class="en">Description &mdash; too short</span><span style="color:var(--red)" class="zh">描述 &mdash; 太短</span></div>
+      <div class="ba-row"><div class="ba-dot dot-red"></div><span style="color:var(--red)" class="en">Material &mdash; missing</span><span style="color:var(--red)" class="zh">材质 &mdash; 缺失</span></div>
+      <div class="ba-row"><div class="ba-dot dot-red"></div><span style="color:var(--red)" class="en">GTIN/Barcode &mdash; missing</span><span style="color:var(--red)" class="zh">条形码 &mdash; 缺失</span></div>
+      <div class="ba-row"><div class="ba-dot dot-red"></div><span style="color:var(--red)" class="en">Reviews &mdash; missing</span><span style="color:var(--red)" class="zh">评价 &mdash; 缺失</span></div>
+    </div>
+    <div class="ba-card ba-after">
+      <div class="ba-score ba-score-after">87<span style="font-size:18px;font-weight:400;">/100</span></div>
+      <div class="ba-label ba-label-after en">After &mdash; AI Ready</div>
+      <div class="ba-label ba-label-after zh">优化后 &mdash; AI 可见</div>
+      <div class="ba-row"><div class="ba-dot dot-green"></div><span class="en">Product Name</span><span class="zh">产品名称</span></div>
+      <div class="ba-row"><div class="ba-dot dot-green"></div><span class="en">Price</span><span class="zh">价格</span></div>
+      <div class="ba-row"><div class="ba-dot dot-green"></div><span class="en">Brand: EcoStride</span><span class="zh">品牌：EcoStride</span></div>
+      <div class="ba-row"><div class="ba-dot dot-green"></div><span class="en">Description: 120-word AI copy</span><span class="zh">描述：120 字 AI 生成文案</span></div>
+      <div class="ba-row"><div class="ba-dot dot-green"></div><span class="en">Material: Natural rubber</span><span class="zh">材质：天然橡胶</span></div>
+      <div class="ba-row"><div class="ba-dot dot-green"></div><span class="en">GTIN: 0123456789012</span><span class="zh">条形码：0123456789012</span></div>
+      <div class="ba-row"><div class="ba-dot dot-green"></div><span class="en">Reviews: enabled via Judge.me</span><span class="zh">评价：已通过 Judge.me 启用</span></div>
+    </div>
+  </div>
+</section>
+</div>
+
 <!-- HOW IT WORKS -->
-<div class="how-section">
 <section class="section">
   <div class="section-label en">How it works</div>
   <div class="section-label zh">使用流程</div>
   <h2 class="en">Three steps to AI visibility</h2>
-  <h2 class="zh">三步提升 AI 可視性</h2>
+  <h2 class="zh">三步提升 AI 可见性</h2>
   <div class="steps" style="margin-top:40px;">
     <div class="step">
       <div class="step-num">1</div>
       <h3 class="en">Enter your store URL</h3>
-      <h3 class="zh">输入店都地址</h3>
-      <p class="en">Paste your Shopify domain. No login, no setup.</p>
+      <h3 class="zh">输入店铺地址</h3>
+      <p class="en">Paste your Shopify domain. No login, no setup required.</p>
       <p class="zh">粘贴你的 Shopify 域名，无需登录。</p>
     </div>
     <div class="step">
       <div class="step-num">2</div>
       <h3 class="en">Get your AI Readiness Score</h3>
-      <h3 class="zh">获取 AI 可用性分数</h3>
+      <h3 class="zh">获取 AI 可见性评分</h3>
       <p class="en">We scan up to 20 products and score each one across 13 structured data fields.</p>
-      <p class="zh">扫描最多 20 个产品，攸改 13 個结构化数据字段裂价。</p>
+      <p class="zh">扫描最多 20 个产品，对 13 个结构化数据字段逐一评分。</p>
     </div>
     <div class="step">
       <div class="step-num">3</div>
       <h3 class="en">Fix with one click</h3>
-      <h3 class="zh">一重修复</h3>
+      <h3 class="zh">一键修复</h3>
       <p class="en">Generate AI-optimized descriptions and save them directly to Shopify.</p>
       <p class="zh">生成 AI 优化描述，直接保存到 Shopify。</p>
+    </div>
+  </div>
+  <!-- MOCKUP -->
+  <div class="mockup-wrap">
+    <div class="mockup-bar">
+      <div class="mockup-dot" style="background:#FF5F57;"></div>
+      <div class="mockup-dot" style="background:#FFBD2E;"></div>
+      <div class="mockup-dot" style="background:#28CA41;"></div>
+      <span style="color:#666;font-size:12px;margin-left:10px;">aiready-checker.onrender.com/app</span>
+    </div>
+    <div class="mockup-body">
+      <div class="mockup-metric-row">
+        <div class="mockup-metric"><div class="mockup-metric-val">20</div><div class="mockup-metric-lbl en">Products scanned</div><div class="mockup-metric-lbl zh">已扫描产品</div></div>
+        <div class="mockup-metric"><div class="mockup-metric-val" style="color:var(--yellow);">41<span style="font-size:13px;font-weight:400;">/100</span></div><div class="mockup-metric-lbl en">Avg AI Readiness Score</div><div class="mockup-metric-lbl zh">平均 AI 可见性评分</div></div>
+        <div class="mockup-metric"><div class="mockup-metric-val" style="color:var(--red);">87</div><div class="mockup-metric-lbl en">Total missing fields</div><div class="mockup-metric-lbl zh">缺失字段总数</div></div>
+      </div>
+      <div class="mockup-row"><span>EcoStride Yoga Mat 6mm</span><span class="pill pill-red">23/100</span></div>
+      <div class="mockup-row"><span>Bamboo Water Bottle 500ml</span><span class="pill pill-yellow">52/100</span></div>
+      <div class="mockup-row"><span>Organic Cotton Tote Bag</span><span class="pill pill-green">81/100</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<div class="bg-gray">
+<section class="section">
+  <div class="section-label en">Features</div>
+  <div class="section-label zh">功能</div>
+  <h2 class="en">Everything your store needs<br/>to win AI search</h2>
+  <h2 class="zh">让你的店铺赢得 AI 搜索<br/>所需的一切</h2>
+  <p class="section-sub en">Built specifically for Shopify &mdash; no complex setup required.</p>
+  <p class="section-sub zh">专为 Shopify 打造，无需复杂配置。</p>
+  <div class="features">
+    <div class="feature-card">
+      <div class="feature-icon">&#128202;</div>
+      <h3 class="en">AI Readiness Score</h3>
+      <h3 class="zh">AI 可见性评分</h3>
+      <p class="en">Score every product 0&ndash;100 across 13 structured data fields. See exactly what's missing and how many points each fix is worth.</p>
+      <p class="zh">对 13 个结构化数据字段进行 0–100 评分，清楚看到缺少什么、每项修复值多少分。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#129302;</div>
+      <h3 class="en">AI Description Generator</h3>
+      <h3 class="zh">AI 描述生成器</h3>
+      <p class="en">Generate GEO-optimized product descriptions in one click. Naturally includes material, color, size, and use cases &mdash; exactly what AI engines look for.</p>
+      <p class="zh">一键生成 GEO 优化描述，自然包含材质、颜色、尺寸、使用场景，正是 AI 引擎需要的内容。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#128279;</div>
+      <h3 class="en">Direct Shopify Integration</h3>
+      <h3 class="zh">直接集成 Shopify</h3>
+      <p class="en">Connect your store via OAuth and save fixes directly to your products &mdash; no copy-pasting needed.</p>
+      <p class="zh">通过 OAuth 连接店铺，直接保存修复结果，无需手动复制粘贴。</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">&#128336;</div>
+      <h3 class="en">Weekly Score Reports</h3>
+      <h3 class="zh">每周评分报告</h3>
+      <p class="en">Subscribe and get an automated weekly email showing your store's AI readiness score and what changed.</p>
+      <p class="zh">订阅后每周自动收到邮件，显示你的店铺评分变化。</p>
     </div>
   </div>
 </section>
 </div>
 
-<!-- FEATURES -->
+<!-- TESTIMONIALS -->
 <section class="section">
-  <div class="section-label en">Features</div>
-  <div class="section-label zh">功能</div>
-  <h2 class="en">Everything your store needs<br/>to win AI search</h2>
-  <h2 class="zh">让你的店都赶饢 AI &#25索;引</h2>
-  <p class="section-sub en">Built specifically for Shopify &mdash; no complex setup required.</p>
-  <p class="section-sub zh">专为 Shopify &#25타造，无需复杂配置。</p>
-  <div class="features">
-    <div class="feature-card">
-      <div class="feature-icon">📊</div>
-      <h3 class="en">AI Readiness Score</h3>
-      <h3 class="zh">AI 可用性分数</h3>
-      <p class="en">Score every product 0&ndash;100 across 13 structured data fields. See exactly what&apos;s missing and how many points each fix is worth.</p>
-      <p class="zh">攻从 13 個结构化数据字段对&#27ỗỗ产品裂价 0&ndash;100 分。</p>
+  <div class="section-label en">What store owners say</div>
+  <div class="section-label zh">店主怎么说</div>
+  <h2 class="en">Real results from real stores</h2>
+  <h2 class="zh">真实店铺的真实反馈</h2>
+  <div class="testi-grid" style="margin-top:40px;">
+    <div class="testi-card">
+      <div class="testi-stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
+      <p class="testi-text en">"Scanned my store and found 6 products with missing brand fields. Fixed them all in 10 minutes using the bulk tool. My score went from 34 to 71."</p>
+      <p class="testi-text zh">"扫描了我的店铺，发现 6 个产品缺少品牌字段。用批量工具 10 分钟全修好了，评分从 34 涨到了 71。"</p>
+      <div class="testi-author">Sarah K.</div>
+      <div class="testi-store en">Home &amp; Decor store, 340 products</div>
+      <div class="testi-store zh">家居装饰店，340 个产品</div>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon">🤖</div>
-      <h3 class="en">AI Description Generator</h3>
-      <h3 class="zh">AI 描述生成器</h3>
-      <p class="en">Generate GEO-optimized product descriptions in one click. Naturally includes material, color, size, and use cases &mdash; exactly what AI engines look for.</p>
-      <p class="zh">一重生成临描述，自然包含材质、颜色、履構、使用场景。</p>
+    <div class="testi-card">
+      <div class="testi-stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
+      <p class="testi-text en">"I had no idea what structured data was before this. The tool explained everything in plain language and the AI descriptions are actually good."</p>
+      <p class="testi-text zh">"之前完全不知道结构化数据是什么。这个工具用简单语言解释了一切，AI 生成的描述质量也很高。"</p>
+      <div class="testi-author">Marcus T.</div>
+      <div class="testi-store en">Sports &amp; Outdoors store, 120 products</div>
+      <div class="testi-store zh">运动户外店，120 个产品</div>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon">🔗</div>
-      <h3 class="en">Direct Shopify Integration</h3>
-      <h3 class="zh">直接集成 Shopify</h3>
-      <p class="en">Connect your store via OAuth and save fixes directly to your products &mdash; no copy-pasting.</p>
-      <p class="zh">通过 OAuth 连接店都，直接保存修复结果。</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🕐</div>
-      <h3 class="en">Weekly Score Reports</h3>
-      <h3 class="zh">每周分数报告</h3>
-      <p class="en">Subscribe and get an automated weekly email showing your store&apos;s AI readiness score and what changed.</p>
-      <p class="zh">订阅后&#27ỗỗ获得&#27ỗỗ周自动邮件报告，观察分数变化。</p>
+    <div class="testi-card">
+      <div class="testi-stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
+      <p class="testi-text en">"Worth the $9 just for the bulk description generator. Rewrote 18 product descriptions in one afternoon. Would have taken me a week manually."</p>
+      <p class="testi-text zh">"光是批量描述生成就值 9 美元。一个下午重写了 18 个产品描述，手动写要花一周。"</p>
+      <div class="testi-author">Linda W.</div>
+      <div class="testi-store en">Skincare brand, 85 products</div>
+      <div class="testi-store zh">护肤品牌，85 个产品</div>
     </div>
   </div>
 </section>
 
 <!-- PRICING -->
-<div class="how-section">
+<div class="bg-gray">
 <section class="section" style="text-align:center;">
   <div class="section-label en">Pricing</div>
-  <div class="section-label zh">&#20代;价</div>
+  <div class="section-label zh">价格</div>
   <h2 class="en">Simple, honest pricing</h2>
   <h2 class="zh">简单透明的价格</h2>
-  <p class="section-sub en" style="margin:0 auto 40px;">Start free. Upgrade when you&apos;re ready.</p>
-  <p class="section-sub zh" style="margin:0 auto 40px;">以为我使用，使用后可以划级。</p>
+  <p class="section-sub en" style="margin:0 auto 40px;">Start free. Upgrade when you're ready.</p>
+  <p class="section-sub zh" style="margin:0 auto 40px;">免费开始，准备好了再升级。</p>
   <div class="pricing">
     <div class="price-card">
       <div class="price-tier en">Free</div>
-      <div class="price-tier zh">为我使用</div>
+      <div class="price-tier zh">免费版</div>
       <div class="price-amount">$0</div>
       <div class="price-desc en">No credit card needed</div>
       <div class="price-desc zh">无需信用卡</div>
       <ul class="price-features">
-        <li class="en">Scan up to 20 products</li>
-        <li class="zh">扫描最多 20 产品</li>
-        <li class="en">Full AI Readiness Score</li>
-        <li class="zh">完整 AI 分数</li>
-        <li class="en">5 free AI fixes</li>
-        <li class="zh">5 次为我 AI 修复</li>
-        <li class="en">PDF report download</li>
-        <li class="zh">PDF 报告下载</li>
+        <li class="en">Scan up to 20 products</li><li class="zh">扫描最多 20 个产品</li>
+        <li class="en">Full AI Readiness Score</li><li class="zh">完整 AI 评分</li>
+        <li class="en">5 free AI fixes</li><li class="zh">5 次免费 AI 修复</li>
+        <li class="en">PDF report download</li><li class="zh">PDF 报告下载</li>
       </ul>
       <a href="/app" class="btn-price btn-price-free">
         <span class="en">Start Free Scan</span>
-        <span class="zh">开始为我扫描</span>
+        <span class="zh">开始免费扫描</span>
       </a>
     </div>
     <div class="price-card featured">
       <div class="price-tier en">Unlimited</div>
-      <div class="price-tier zh">无限划级</div>
+      <div class="price-tier zh">无限版</div>
       <div class="price-amount">$9</div>
       <div class="price-desc en">one-time, per store</div>
-      <div class="price-desc zh">一次性&#25불款，&#27ỗỗ店都</div>
+      <div class="price-desc zh">一次性付款，按店铺</div>
       <ul class="price-features">
-        <li class="en">Everything in Free</li>
-        <li class="zh">包含为我折有功能</li>
-        <li class="en">Unlimited AI description generation</li>
-        <li class="zh">无限次 AI 描述生成</li>
-        <li class="en">Save directly to Shopify</li>
-        <li class="zh">直接保存到 Shopify</li>
-        <li class="en">Bulk fix all products</li>
-        <li class="zh">批量修复全部产品</li>
-        <li class="en">Weekly email reports</li>
-        <li class="zh">每周报告邮件</li>
+        <li class="en">Everything in Free</li><li class="zh">包含所有免费功能</li>
+        <li class="en">Unlimited AI descriptions</li><li class="zh">无限次 AI 描述生成</li>
+        <li class="en">Save directly to Shopify</li><li class="zh">直接保存到 Shopify</li>
+        <li class="en">Bulk fix all products</li><li class="zh">批量修复全部产品</li>
+        <li class="en">Weekly email reports</li><li class="zh">每周报告邮件</li>
       </ul>
       <a href="/app" class="btn-price btn-price-paid">
         <span class="en">Get Unlimited &rarr;</span>
-        <span class="zh">划级无限 &rarr;</span>
+        <span class="zh">升级无限版 &rarr;</span>
       </a>
     </div>
   </div>
 </section>
 </div>
 
+<!-- FAQ -->
+<section class="section">
+  <div class="section-label en">FAQ</div>
+  <div class="section-label zh">常见问题</div>
+  <h2 class="en">Questions &amp; answers</h2>
+  <h2 class="zh">问题解答</h2>
+  <div style="margin-top:32px;">
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span class="en">What is GEO and why does it matter for my Shopify store?</span>
+        <span class="zh">什么是 GEO，为什么对我的 Shopify 店铺重要？</span>
+        <span class="faq-icon">+</span>
+      </div>
+      <div class="faq-a en">GEO stands for Generative Engine Optimization. It's the practice of structuring your product data so AI engines like ChatGPT, Perplexity, and Gemini can understand and recommend your products. As more shoppers use AI to find products instead of Google, GEO is becoming as important as SEO.</div>
+      <div class="faq-a zh">GEO 是生成式引擎优化（Generative Engine Optimization）。它是指优化产品数据结构，让 ChatGPT、Perplexity、Gemini 等 AI 引擎能够理解并推荐你的产品。随着越来越多买家用 AI 替代 Google 搜索，GEO 正变得和 SEO 同样重要。</div>
+    </div>
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span class="en">Do I need to install anything on my Shopify store?</span>
+        <span class="zh">我需要在 Shopify 店铺安装什么吗？</span>
+        <span class="faq-icon">+</span>
+      </div>
+      <div class="faq-a en">No. Just enter your store URL and we scan it immediately &mdash; no installation required. If you want to save fixes directly to your products, you can connect via Shopify OAuth (one-click install).</div>
+      <div class="faq-a zh">不需要。只需输入店铺 URL 即可立即扫描，无需安装任何内容。如果你想直接保存修复结果到产品，可以通过 Shopify OAuth 一键连接。</div>
+    </div>
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span class="en">Is my store data safe?</span>
+        <span class="zh">我的店铺数据安全吗？</span>
+        <span class="faq-icon">+</span>
+      </div>
+      <div class="faq-a en">We only read publicly available product data (the same data anyone can see on your storefront). We don't store your product data after the scan is complete. If you connect via OAuth, access tokens are stored securely and only used to push description updates you approve.</div>
+      <div class="faq-a zh">我们只读取公开的产品数据（任何人在你店铺前台都能看到的数据）。扫描完成后不会存储你的产品数据。通过 OAuth 连接时，访问令牌安全存储，仅用于推送你批准的描述更新。</div>
+    </div>
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span class="en">How is this different from regular Shopify SEO apps?</span>
+        <span class="zh">这和普通 Shopify SEO 工具有什么区别？</span>
+        <span class="faq-icon">+</span>
+      </div>
+      <div class="faq-a en">Traditional SEO apps focus on Google search rankings &mdash; meta titles, keywords, backlinks. AiReady focuses on AI engine visibility: structured data fields, description richness, and the specific signals that ChatGPT and Perplexity use to decide which products to recommend.</div>
+      <div class="faq-a zh">传统 SEO 工具专注于 Google 排名 &mdash; 标题标签、关键词、外链。AiReady 专注于 AI 引擎可见性：结构化数据字段、描述丰富度，以及 ChatGPT 和 Perplexity 决定推荐哪些产品时使用的具体信号。</div>
+    </div>
+    <div class="faq-item">
+      <div class="faq-q" onclick="toggleFaq(this)">
+        <span class="en">What is the $9 one-time payment for?</span>
+        <span class="zh">9 美元一次性付款包含什么？</span>
+        <span class="faq-icon">+</span>
+      </div>
+      <div class="faq-a en">The $9 unlocks unlimited AI description generation, direct Shopify saving, bulk fix for all products, and weekly email reports &mdash; forever, for that store. No subscriptions, no recurring charges.</div>
+      <div class="faq-a zh">9 美元解锁该店铺的无限次 AI 描述生成、直接保存到 Shopify、批量修复全部产品、每周邮件报告 &mdash; 永久有效，无订阅，无续费。</div>
+    </div>
+  </div>
+</section>
+
 <!-- CTA BAND -->
 <div class="cta-band">
   <h2 class="en">Find out your score in 30 seconds</h2>
-  <h2 class="zh">30 秒中于亮若得你的分数</h2>
+  <h2 class="zh">30 秒找出你的评分</h2>
   <p class="en">Free scan, no account needed.</p>
-  <p class="zh">为我扫描，无需注册。</p>
+  <p class="zh">免费扫描，无需注册。</p>
   <a href="/app" class="btn-nav" style="font-size:16px;padding:14px 36px;display:inline-block;">
     <span class="en">Scan My Store Free &rarr;</span>
-    <span class="zh">为我扫描店都 &rarr;</span>
+    <span class="zh">免费扫描我的店铺 &rarr;</span>
   </a>
 </div>
 
 <footer>
   <div class="nav-logo" style="font-size:15px;">Ai<span style="color:#95BF47;">Ready</span></div>
   <div class="en">AI Readiness Checker for Shopify &mdash; &copy; 2025 AiReady</div>
-  <div class="zh">Shopify AI 可視性检测工具 &mdash; &copy; 2025 AiReady</div>
+  <div class="zh">Shopify AI 可见性检测工具 &mdash; &copy; 2025 AiReady</div>
 </footer>
 
 <script>
 function goScan() {
   var url = document.getElementById('heroUrl').value.trim();
-  if (url) {
-    window.location.href = '/app?url=' + encodeURIComponent(url);
-  } else {
-    window.location.href = '/app';
-  }
+  if (url) { window.location.href = '/app?url=' + encodeURIComponent(url); }
+  else { window.location.href = '/app'; }
 }
 document.getElementById('heroUrl').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') goScan();
@@ -1521,10 +1658,14 @@ document.getElementById('heroUrl').addEventListener('keydown', function(e) {
 function toggleLang() {
   document.body.classList.toggle('lang-zh');
 }
+function toggleFaq(el) {
+  el.closest('.faq-item').classList.toggle('open');
+}
 </script>
 </body>
 </html>
 """
+
 
 @app.route('/')
 def index():
