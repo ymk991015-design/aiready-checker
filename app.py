@@ -284,8 +284,26 @@ HTML_TEMPLATE = """
 <div class="page">
 
   <div class="page-header">
-    <div class="page-title">AI Readiness Scanner</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:4px;">
+      <div class="page-title">AI Readiness Scanner</div>
+      <a href="/" style="font-size:13px;color:var(--text-sub);text-decoration:none;">&larr; Home</a>
+    </div>
     <div class="page-subtitle">Check how visible your Shopify products are to AI engines like ChatGPT, Perplexity, and Gemini.</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;">
+    <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:flex;gap:10px;align-items:flex-start;">
+      <div style="font-size:18px;line-height:1;">&#128202;</div>
+      <div><div style="font-size:13px;font-weight:600;margin-bottom:2px;color:var(--text);">Score every product</div><div style="font-size:12px;color:var(--text-sub);">13 fields checked. See what&apos;s missing and the point impact.</div></div>
+    </div>
+    <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:flex;gap:10px;align-items:flex-start;">
+      <div style="font-size:18px;line-height:1;">&#129302;</div>
+      <div><div style="font-size:13px;font-weight:600;margin-bottom:2px;color:var(--text);">Generate AI descriptions</div><div style="font-size:12px;color:var(--text-sub);">One-click GEO copy that AI engines can read and recommend.</div></div>
+    </div>
+    <div style="background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:flex;gap:10px;align-items:flex-start;">
+      <div style="font-size:18px;line-height:1;">&#128279;</div>
+      <div><div style="font-size:13px;font-weight:600;margin-bottom:2px;color:var(--text);">Save to Shopify</div><div style="font-size:12px;color:var(--text-sub);">Connect your store and push fixes without leaving this page.</div></div>
+    </div>
   </div>
 
   <div id="shopBanner" class="shop-banner">
@@ -1267,12 +1285,12 @@ LANDING_TEMPLATE = """
   <div class="nav-logo">Ai<span>Ready</span></div>
   <div class="nav-right">
     <button class="lang-btn" onclick="toggleLang()">
-      <span class="en">&#20013;&#25991;</span>
+      <span class="en">中文</span>
       <span class="zh">English</span>
     </button>
     <a href="/app" class="btn-nav">
       <span class="en">Free Scan &rarr;</span>
-      <span class="zh">&#20026;&#25105;&#25195;&#25551; &rarr;</span>
+      <span class="zh">为我扫描 &rarr;</span>
     </a>
   </div>
 </nav>
@@ -1280,29 +1298,29 @@ LANDING_TEMPLATE = """
 <!-- HERO -->
 <section class="hero">
   <div class="hero-badge en">NEW &mdash; AI Search Optimization for Shopify</div>
-  <div class="hero-badge zh">&#26032;&#24037;&#20855; &mdash; Shopify AI &#641;&#25索&#20248;&#21270;</div>
+  <div class="hero-badge zh">新工具 &mdash; Shopify AI ʁ&#25索优化</div>
 
   <h1 class="en">Is your store <em>invisible</em><br/>to ChatGPT?</h1>
-  <h1 class="zh">&#20320;&#30340;&#24215;&#37117;&#23545; ChatGPT <em>&#38544;&#24418;</em>&#21527;&#65311;</h1>
+  <h1 class="zh">你的店都对 ChatGPT <em>隐形</em>吗？</h1>
 
   <p class="hero-sub en">AI engines are replacing Google search. If your Shopify products lack structured data, they won&apos;t get recommended. Check your store free in 30 seconds.</p>
-  <p class="hero-sub zh">AI &#24341;&#25擎;&#27491;&#22312;&#21462;&#20195; Google &#25索;&#12290;&#22914;&#26524;&#20320;&#30340; Shopify &#20135;&#21697;&#32570;&#23569;&#32467;&#26500;&#21270;&#25968;&#25454;&#65292;AI &#23601;&#19981;&#20250;&#25512;&#33616;&#20320;&#30340;&#20135;&#21697;&#12290;30 &#31186;&#20013;&#20110;&#20142;&#25195;&#25551;&#12290;</p>
+  <p class="hero-sub zh">AI 引&#25擎;正在取代 Google &#25索;。如果你的 Shopify 产品缺少结构化数据，AI 就不会推荐你的产品。30 秒中于亮扫描。</p>
 
   <div class="hero-input-row">
     <input type="text" class="hero-input" id="heroUrl" placeholder="yourstore.myshopify.com" />
     <button class="btn-hero" onclick="goScan()">
       <span class="en">Scan Free</span>
-      <span class="zh">&#20026;&#25105;&#25195;&#25551;</span>
+      <span class="zh">为我扫描</span>
     </button>
   </div>
   <p class="hero-hint en">No signup required &mdash; scan up to 20 products for free</p>
-  <p class="hero-hint zh">&#26080;&#38656;&#27880;&#20876; &mdash; &#20026;&#25105;&#25195;&#25551;&#26368;&#22810; 20 &#20010;&#20135;&#21697;</p>
+  <p class="hero-hint zh">无需注册 &mdash; 为我扫描最多 20 个产品</p>
 </section>
 
 <!-- AI LOGOS -->
 <div class="logos">
   <div class="logos-label en">Optimize for AI engines</div>
-  <div class="logos-label zh">&#20026;&#20197;&#19979; AI &#24341;&#25擎;&#20248;&#21270;</div>
+  <div class="logos-label zh">为以下 AI 引&#25擎;优化</div>
   <div class="logos-row">
     <div class="logo-item">ChatGPT</div>
     <div class="logo-item">Perplexity</div>
@@ -1315,26 +1333,26 @@ LANDING_TEMPLATE = """
 <!-- PROBLEM -->
 <section class="section">
   <div class="section-label en">The Problem</div>
-  <div class="section-label zh">&#38382;&#39064;&#25152;&#22312;</div>
+  <div class="section-label zh">问题所在</div>
   <h2 class="en">AI is the new search.<br/>Most stores aren&apos;t ready.</h2>
-  <h2 class="zh">AI &#23601;&#26159;&#26032;&#30340;&#25索;&#24341;&#25擎;&#12290;&#22823;&#22810;&#25968;&#24215;&#37117;&#27809;&#26377;&#20934;&#22909;&#12290;</h2>
+  <h2 class="zh">AI 就是新的&#25索;引&#25擎;。大多数店都没有准好。</h2>
   <p class="section-sub en">When someone asks ChatGPT &quot;what&apos;s the best yoga mat under $50&quot;, it recommends products with rich, structured data. Missing brand, material, reviews, or GTIN means your products get skipped.</p>
-  <p class="section-sub zh">&#24403;&#29992;&#25143;&#38382; ChatGPT &#8220;50 &#32508;&#20107;&#20869;&#26368;&#22909;&#30340;&#29瑜;&#20316;&#22369;&#8221;&#65292;AI &#20250;&#25512;&#33616;&#25320;&#26377;&#20540;&#30340;&#32467;&#26500;&#21270;&#25968;&#25454;&#30340;&#20135;&#21697;&#12290;&#32570;&#23569; Brand&#12289;Material&#12289;&#35624;&#20215;&#65292;&#20320;&#30340;&#20135;&#21697;&#23601;&#20250;&#34987;&#36339;&#36807;&#12290;</p>
+  <p class="section-sub zh">当用户问 ChatGPT “50 综事内最好的&#29瑜;作坡”，AI 会推荐拨有值的结构化数据的产品。缺少 Brand、Material、謨价，你的产品就会被跳过。</p>
   <div class="stat-grid">
     <div class="stat-card">
       <div class="stat-num">58%</div>
       <div class="stat-label en">of product searches now start on AI engines, not Google</div>
-      <div class="stat-label zh">&#20135;&#21697;&#25索;&#24341;&#24037;&#24037;&#24037;&#24037;&#24037; AI &#24341;&#25擎;</div>
+      <div class="stat-label zh">产品&#25索;引工工工工工 AI 引&#25擎;</div>
     </div>
     <div class="stat-card">
       <div class="stat-num">73%</div>
       <div class="stat-label en">of Shopify stores score below 50/100 on AI readiness</div>
-      <div class="stat-label zh">Shopify &#24215;&#37117; AI &#21487;&#35222;&#24615;&#25타&#20998;&#19981;&#36798; 50/100</div>
+      <div class="stat-label zh">Shopify 店都 AI 可視性&#25타分不达 50/100</div>
     </div>
     <div class="stat-card">
       <div class="stat-num">3x</div>
       <div class="stat-label en">more AI recommendations for stores with complete structured data</div>
-      <div class="stat-label zh">&#23436;&#25972;&#32467;&#26500;&#21270;&#25968;&#25454;&#25010;&#24215;&#33719;&#24471; 3&#20498;&#26356;&#22810; AI &#25512;&#33616;</div>
+      <div class="stat-label zh">完整结构化数据憲店获得 3倒更多 AI 推荐</div>
     </div>
   </div>
 </section>
@@ -1343,30 +1361,30 @@ LANDING_TEMPLATE = """
 <div class="how-section">
 <section class="section">
   <div class="section-label en">How it works</div>
-  <div class="section-label zh">&#20351;&#29992;&#27969;&#31243;</div>
+  <div class="section-label zh">使用流程</div>
   <h2 class="en">Three steps to AI visibility</h2>
-  <h2 class="zh">&#19977;&#27493;&#25552;&#21319; AI &#21487;&#35222;&#24615;</h2>
+  <h2 class="zh">三步提升 AI 可視性</h2>
   <div class="steps" style="margin-top:40px;">
     <div class="step">
       <div class="step-num">1</div>
       <h3 class="en">Enter your store URL</h3>
-      <h3 class="zh">&#36755;&#20837;&#24215;&#37117;&#22320;&#22336;</h3>
+      <h3 class="zh">输入店都地址</h3>
       <p class="en">Paste your Shopify domain. No login, no setup.</p>
-      <p class="zh">&#31896;&#36148;&#20320;&#30340; Shopify &#22495;&#21517;&#65292;&#26080;&#38656;&#30331;&#24405;&#12290;</p>
+      <p class="zh">粘贴你的 Shopify 域名，无需登录。</p>
     </div>
     <div class="step">
       <div class="step-num">2</div>
       <h3 class="en">Get your AI Readiness Score</h3>
-      <h3 class="zh">&#33719;&#21462; AI &#21487;&#29992;&#24615;&#20998;&#25968;</h3>
+      <h3 class="zh">获取 AI 可用性分数</h3>
       <p class="en">We scan up to 20 products and score each one across 13 structured data fields.</p>
-      <p class="zh">&#25195;&#25551;&#26368;&#22810; 20 &#20010;&#20135;&#21697;&#65292;&#25912;&#25913; 13 &#20491;&#32467;&#26500;&#21270;&#25968;&#25454;&#23383;&#27573;&#35010;&#20215;&#12290;</p>
+      <p class="zh">扫描最多 20 个产品，攸改 13 個结构化数据字段裂价。</p>
     </div>
     <div class="step">
       <div class="step-num">3</div>
       <h3 class="en">Fix with one click</h3>
-      <h3 class="zh">&#19968;&#37325;&#20462;&#22797;</h3>
+      <h3 class="zh">一重修复</h3>
       <p class="en">Generate AI-optimized descriptions and save them directly to Shopify.</p>
-      <p class="zh">&#29983;&#25104; AI &#20248;&#21270;&#25551;&#36848;&#65292;&#30452;&#25509;&#20445;&#23384;&#21040; Shopify&#12290;</p>
+      <p class="zh">生成 AI 优化描述，直接保存到 Shopify。</p>
     </div>
   </div>
 </section>
@@ -1375,39 +1393,39 @@ LANDING_TEMPLATE = """
 <!-- FEATURES -->
 <section class="section">
   <div class="section-label en">Features</div>
-  <div class="section-label zh">&#21151;&#33021;</div>
+  <div class="section-label zh">功能</div>
   <h2 class="en">Everything your store needs<br/>to win AI search</h2>
-  <h2 class="zh">&#35753;&#20320;&#30340;&#24215;&#37117;&#36214;&#39266; AI &#25索;&#24341;</h2>
+  <h2 class="zh">让你的店都赶饢 AI &#25索;引</h2>
   <p class="section-sub en">Built specifically for Shopify &mdash; no complex setup required.</p>
-  <p class="section-sub zh">&#19987;&#20026; Shopify &#25타&#36896;&#65292;&#26080;&#38656;&#22797;&#26434;&#37197;&#32622;&#12290;</p>
+  <p class="section-sub zh">专为 Shopify &#25타造，无需复杂配置。</p>
   <div class="features">
     <div class="feature-card">
-      <div class="feature-icon">&#128202;</div>
+      <div class="feature-icon">📊</div>
       <h3 class="en">AI Readiness Score</h3>
-      <h3 class="zh">AI &#21487;&#29992;&#24615;&#20998;&#25968;</h3>
+      <h3 class="zh">AI 可用性分数</h3>
       <p class="en">Score every product 0&ndash;100 across 13 structured data fields. See exactly what&apos;s missing and how many points each fix is worth.</p>
-      <p class="zh">&#25915;&#20174; 13 &#20491;&#32467;&#26500;&#21270;&#25968;&#25454;&#23383;&#27573;&#23545;&#27ỗỗ&#20135;&#21697;&#35010;&#20215; 0&ndash;100 &#20998;&#12290;</p>
+      <p class="zh">攻从 13 個结构化数据字段对&#27ỗỗ产品裂价 0&ndash;100 分。</p>
     </div>
     <div class="feature-card">
-      <div class="feature-icon">&#129302;</div>
+      <div class="feature-icon">🤖</div>
       <h3 class="en">AI Description Generator</h3>
-      <h3 class="zh">AI &#25551;&#36848;&#29983;&#25104;&#22120;</h3>
+      <h3 class="zh">AI 描述生成器</h3>
       <p class="en">Generate GEO-optimized product descriptions in one click. Naturally includes material, color, size, and use cases &mdash; exactly what AI engines look for.</p>
-      <p class="zh">&#19968;&#37325;&#29983;&#25104;&#20020;&#25551;&#36848;&#65292;&#33258;&#28982;&#21253;&#21547;&#26448;&#36136;&#12289;&#39068;&#33394;&#12289;&#23653;&#27083;&#12289;&#20351;&#29992;&#22330;&#26223;&#12290;</p>
+      <p class="zh">一重生成临描述，自然包含材质、颜色、履構、使用场景。</p>
     </div>
     <div class="feature-card">
-      <div class="feature-icon">&#128279;</div>
+      <div class="feature-icon">🔗</div>
       <h3 class="en">Direct Shopify Integration</h3>
-      <h3 class="zh">&#30452;&#25509;&#38598;&#25104; Shopify</h3>
+      <h3 class="zh">直接集成 Shopify</h3>
       <p class="en">Connect your store via OAuth and save fixes directly to your products &mdash; no copy-pasting.</p>
-      <p class="zh">&#36890;&#36807; OAuth &#36830;&#25509;&#24215;&#37117;&#65292;&#30452;&#25509;&#20445;&#23384;&#20462;&#22797;&#32467;&#26524;&#12290;</p>
+      <p class="zh">通过 OAuth 连接店都，直接保存修复结果。</p>
     </div>
     <div class="feature-card">
-      <div class="feature-icon">&#128336;</div>
+      <div class="feature-icon">🕐</div>
       <h3 class="en">Weekly Score Reports</h3>
-      <h3 class="zh">&#27599;&#21608;&#20998;&#25968;&#25253;&#21578;</h3>
+      <h3 class="zh">每周分数报告</h3>
       <p class="en">Subscribe and get an automated weekly email showing your store&apos;s AI readiness score and what changed.</p>
-      <p class="zh">&#35746;&#38405;&#21518;&#27ỗỗ&#33719;&#24471;&#27ỗỗ&#21608;&#33258;&#21160;&#37038;&#20214;&#25253;&#21578;&#65292;&#35266;&#23519;&#20998;&#25968;&#21464;&#21270;&#12290;</p>
+      <p class="zh">订阅后&#27ỗỗ获得&#27ỗỗ周自动邮件报告，观察分数变化。</p>
     </div>
   </div>
 </section>
@@ -1416,54 +1434,54 @@ LANDING_TEMPLATE = """
 <div class="how-section">
 <section class="section" style="text-align:center;">
   <div class="section-label en">Pricing</div>
-  <div class="section-label zh">&#20代;&#20215;</div>
+  <div class="section-label zh">&#20代;价</div>
   <h2 class="en">Simple, honest pricing</h2>
-  <h2 class="zh">&#31616;&#21333;&#36879;&#26126;&#30340;&#20215;&#26684;</h2>
+  <h2 class="zh">简单透明的价格</h2>
   <p class="section-sub en" style="margin:0 auto 40px;">Start free. Upgrade when you&apos;re ready.</p>
-  <p class="section-sub zh" style="margin:0 auto 40px;">&#20197;&#20026;&#25105;&#20351;&#29992;&#65292;&#20351;&#29992;&#21518;&#21487;&#20197;&#21010;&#32423;&#12290;</p>
+  <p class="section-sub zh" style="margin:0 auto 40px;">以为我使用，使用后可以划级。</p>
   <div class="pricing">
     <div class="price-card">
       <div class="price-tier en">Free</div>
-      <div class="price-tier zh">&#20026;&#25105;&#20351;&#29992;</div>
+      <div class="price-tier zh">为我使用</div>
       <div class="price-amount">$0</div>
       <div class="price-desc en">No credit card needed</div>
-      <div class="price-desc zh">&#26080;&#38656;&#20449;&#29992;&#21345;</div>
+      <div class="price-desc zh">无需信用卡</div>
       <ul class="price-features">
         <li class="en">Scan up to 20 products</li>
-        <li class="zh">&#25195;&#25551;&#26368;&#22810; 20 &#20135;&#21697;</li>
+        <li class="zh">扫描最多 20 产品</li>
         <li class="en">Full AI Readiness Score</li>
-        <li class="zh">&#23436;&#25972; AI &#20998;&#25968;</li>
+        <li class="zh">完整 AI 分数</li>
         <li class="en">5 free AI fixes</li>
-        <li class="zh">5 &#27425;&#20026;&#25105; AI &#20462;&#22797;</li>
+        <li class="zh">5 次为我 AI 修复</li>
         <li class="en">PDF report download</li>
-        <li class="zh">PDF &#25253;&#21578;&#19979;&#36733;</li>
+        <li class="zh">PDF 报告下载</li>
       </ul>
       <a href="/app" class="btn-price btn-price-free">
         <span class="en">Start Free Scan</span>
-        <span class="zh">&#24320;&#22987;&#20026;&#25105;&#25195;&#25551;</span>
+        <span class="zh">开始为我扫描</span>
       </a>
     </div>
     <div class="price-card featured">
       <div class="price-tier en">Unlimited</div>
-      <div class="price-tier zh">&#26080;&#38480;&#21010;&#32423;</div>
+      <div class="price-tier zh">无限划级</div>
       <div class="price-amount">$9</div>
       <div class="price-desc en">one-time, per store</div>
-      <div class="price-desc zh">&#19968;&#27425;&#24615;&#25불&#27454;&#65292;&#27ỗỗ&#24215;&#37117;</div>
+      <div class="price-desc zh">一次性&#25불款，&#27ỗỗ店都</div>
       <ul class="price-features">
         <li class="en">Everything in Free</li>
-        <li class="zh">&#21253;&#21547;&#20026;&#25105;&#25240;&#26377;&#21151;&#33021;</li>
+        <li class="zh">包含为我折有功能</li>
         <li class="en">Unlimited AI description generation</li>
-        <li class="zh">&#26080;&#38480;&#27425; AI &#25551;&#36848;&#29983;&#25104;</li>
+        <li class="zh">无限次 AI 描述生成</li>
         <li class="en">Save directly to Shopify</li>
-        <li class="zh">&#30452;&#25509;&#20445;&#23384;&#21040; Shopify</li>
+        <li class="zh">直接保存到 Shopify</li>
         <li class="en">Bulk fix all products</li>
-        <li class="zh">&#25209;&#37327;&#20462;&#22797;&#20840;&#37096;&#20135;&#21697;</li>
+        <li class="zh">批量修复全部产品</li>
         <li class="en">Weekly email reports</li>
-        <li class="zh">&#27599;&#21608;&#25253;&#21578;&#37038;&#20214;</li>
+        <li class="zh">每周报告邮件</li>
       </ul>
       <a href="/app" class="btn-price btn-price-paid">
         <span class="en">Get Unlimited &rarr;</span>
-        <span class="zh">&#21010;&#32423;&#26080;&#38480; &rarr;</span>
+        <span class="zh">划级无限 &rarr;</span>
       </a>
     </div>
   </div>
@@ -1473,19 +1491,19 @@ LANDING_TEMPLATE = """
 <!-- CTA BAND -->
 <div class="cta-band">
   <h2 class="en">Find out your score in 30 seconds</h2>
-  <h2 class="zh">30 &#31186;&#20013;&#20110;&#20142;&#33509;&#24471;&#20320;&#30340;&#20998;&#25968;</h2>
+  <h2 class="zh">30 秒中于亮若得你的分数</h2>
   <p class="en">Free scan, no account needed.</p>
-  <p class="zh">&#20026;&#25105;&#25195;&#25551;&#65292;&#26080;&#38656;&#27880;&#20876;&#12290;</p>
+  <p class="zh">为我扫描，无需注册。</p>
   <a href="/app" class="btn-nav" style="font-size:16px;padding:14px 36px;display:inline-block;">
     <span class="en">Scan My Store Free &rarr;</span>
-    <span class="zh">&#20026;&#25105;&#25195;&#25551;&#24215;&#37117; &rarr;</span>
+    <span class="zh">为我扫描店都 &rarr;</span>
   </a>
 </div>
 
 <footer>
   <div class="nav-logo" style="font-size:15px;">Ai<span style="color:#95BF47;">Ready</span></div>
   <div class="en">AI Readiness Checker for Shopify &mdash; &copy; 2025 AiReady</div>
-  <div class="zh">Shopify AI &#21487;&#35222;&#24615;&#26816;&#27979;&#24037;&#20855; &mdash; &copy; 2025 AiReady</div>
+  <div class="zh">Shopify AI 可視性检测工具 &mdash; &copy; 2025 AiReady</div>
 </footer>
 
 <script>
