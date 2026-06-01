@@ -309,16 +309,16 @@ HTML_TEMPLATE = """
 (function() {
   var params = new URLSearchParams(window.location.search);
   var shop = params.get('shop');
-  var prefill = params.get('url') || '{{ prefill_url }}';
+  var urlParam = params.get('url');
   if (shop) {
     var banner = document.getElementById('shopBanner');
     var label = document.getElementById('shopLabel');
     if (banner) banner.classList.add('visible');
     if (label) label.textContent = shop;
     document.getElementById('storeUrl').value = shop;
-  } else if (prefill && prefill !== '{{ prefill_url }}') {
-    document.getElementById('storeUrl').value = prefill;
-    setTimeout(runScan, 100);
+  } else if (urlParam) {
+    document.getElementById('storeUrl').value = urlParam;
+    setTimeout(runScan, 200);
   }
 })();
 
