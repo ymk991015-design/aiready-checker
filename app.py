@@ -318,7 +318,6 @@ HTML_TEMPLATE = """
     document.getElementById('storeUrl').value = shop;
   } else if (urlParam) {
     document.getElementById('storeUrl').value = urlParam;
-    setTimeout(runScan, 200);
   }
 })();
 
@@ -940,6 +939,10 @@ function downloadPDF() {
 document.getElementById('storeUrl').addEventListener('keydown', e => {
   if (e.key === 'Enter') runScan();
 });
+(function() {
+  var u = new URLSearchParams(window.location.search).get('url');
+  if (u) { document.getElementById('storeUrl').value = u; runScan(); }
+})();
 </script>
 
 <!-- UPGRADE MODAL -->
