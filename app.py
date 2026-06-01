@@ -277,7 +277,7 @@ HTML_TEMPLATE = """
 <body>
 
 <div class="topbar">
-  <div class="topbar-logo">Ai<span>Ready</span></div>
+  <a href="/" style="text-decoration:none;"><div class="topbar-logo">Ai<span>Ready</span></div></a>
   <div class="topbar-badge">AI Readiness Checker</div>
 </div>
 
