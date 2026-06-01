@@ -8,6 +8,7 @@ import hmac
 import hashlib
 import base64
 import sqlite3
+import tempfile
 from urllib.parse import urljoin, urlparse, urlencode
 from concurrent.futures import ThreadPoolExecutor
 
@@ -16,53 +17,105 @@ app.secret_key = os.environ.get('FLASK_SECRET', 'aiready-secret-key-2025')
 
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 CRON_SECRET = os.environ.get('CRON_SECRET', 'aiready-cron-2025')
-DB_PATH = os.environ.get('DB_PATH', '/tmp/aiready.db')
+DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
+DB_PATH = os.environ.get('DB_PATH', os.path.join(tempfile.gettempdir(), 'aiready.db'))
+USE_POSTGRES = bool(DATABASE_URL)
 
 FREE_LIMIT = 5  # free AI actions per shop
 
+def db_connect():
+    if USE_POSTGRES:
+        import psycopg2
+        return psycopg2.connect(DATABASE_URL)
+    db_dir = os.path.dirname(os.path.abspath(DB_PATH))
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+    return sqlite3.connect(DB_PATH)
+
+def adapt_sql(sql):
+    if not USE_POSTGRES:
+        return sql
+    return (
+        sql.replace('?', '%s')
+        .replace("datetime('now')", 'CURRENT_TIMESTAMP')
+        .replace('datetime("now")', 'CURRENT_TIMESTAMP')
+    )
+
+def db_execute(sql, params=(), fetchone=False, fetchall=False):
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute(adapt_sql(sql), params)
+        result = None
+        if fetchone:
+            result = cur.fetchone()
+        elif fetchall:
+            result = cur.fetchall()
+        conn.commit()
+        return result
+    finally:
+        conn.close()
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute('''CREATE TABLE IF NOT EXISTS subscriptions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    if USE_POSTGRES:
+        id_type = 'SERIAL PRIMARY KEY'
+        now_type = 'TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP'
+        scan_type = 'TIMESTAMPTZ'
+    else:
+        id_type = 'INTEGER PRIMARY KEY AUTOINCREMENT'
+        now_type = "TEXT DEFAULT (datetime('now'))"
+        scan_type = "TEXT DEFAULT ''"
+
+    db_execute(f'''CREATE TABLE IF NOT EXISTS subscriptions (
+        id {id_type},
         email TEXT NOT NULL,
         shop TEXT NOT NULL,
         last_score INTEGER DEFAULT 0,
-        last_scanned TEXT DEFAULT '',
-        created_at TEXT DEFAULT (datetime('now')),
+        last_scanned {scan_type},
+        created_at {now_type},
         UNIQUE(email, shop)
     )''')
-    conn.execute('''CREATE TABLE IF NOT EXISTS usage_counts (
+    db_execute(f'''CREATE TABLE IF NOT EXISTS usage_counts (
         shop TEXT PRIMARY KEY,
         count INTEGER DEFAULT 0,
-        updated_at TEXT DEFAULT (datetime('now'))
+        updated_at {now_type}
     )''')
-    conn.execute('''CREATE TABLE IF NOT EXISTS paid_shops (
+    db_execute(f'''CREATE TABLE IF NOT EXISTS paid_shops (
         shop TEXT PRIMARY KEY,
         paypal_txn_id TEXT,
-        paid_at TEXT DEFAULT (datetime('now'))
+        paid_at {now_type}
     )''')
-    conn.commit()
-    conn.close()
+    db_execute(f'''CREATE TABLE IF NOT EXISTS shop_tokens (
+        shop TEXT PRIMARY KEY,
+        access_token TEXT NOT NULL,
+        scope TEXT DEFAULT '',
+        updated_at {now_type}
+    )''')
+    db_execute(f'''CREATE TABLE IF NOT EXISTS unlock_requests (
+        id {id_type},
+        email TEXT,
+        shop TEXT,
+        created_at {now_type}
+    )''')
 
 def is_paid(shop):
-    conn = sqlite3.connect(DB_PATH)
-    row = conn.execute('SELECT 1 FROM paid_shops WHERE shop=?', (shop,)).fetchone()
-    conn.close()
+    row = db_execute('SELECT 1 FROM paid_shops WHERE shop=?', (shop,), fetchone=True)
     return bool(row)
 
 def get_usage(shop):
-    conn = sqlite3.connect(DB_PATH)
-    row = conn.execute('SELECT count FROM usage_counts WHERE shop=?', (shop,)).fetchone()
-    conn.close()
+    row = db_execute('SELECT count FROM usage_counts WHERE shop=?', (shop,), fetchone=True)
     return row[0] if row else 0
 
 def increment_usage(shop):
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute('''INSERT INTO usage_counts (shop, count) VALUES (?, 1)
-        ON CONFLICT(shop) DO UPDATE SET count=count+1, updated_at=datetime('now')
-    ''', (shop,))
-    conn.commit()
-    conn.close()
+    if USE_POSTGRES:
+        sql = '''INSERT INTO usage_counts (shop, count) VALUES (?, 1)
+            ON CONFLICT(shop) DO UPDATE SET count=usage_counts.count+1, updated_at=CURRENT_TIMESTAMP
+        '''
+    else:
+        sql = '''INSERT INTO usage_counts (shop, count) VALUES (?, 1)
+            ON CONFLICT(shop) DO UPDATE SET count=count+1, updated_at=datetime('now')
+        '''
+    db_execute(sql, (shop,))
 
 init_db()
 
@@ -70,9 +123,64 @@ DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
 SHOPIFY_CLIENT_ID = os.environ.get('SHOPIFY_CLIENT_ID', '')
 SHOPIFY_CLIENT_SECRET = os.environ.get('SHOPIFY_CLIENT_SECRET', '')
 SHOPIFY_SCOPES = 'read_products,write_products'
+SHOPIFY_API_VERSION = os.environ.get('SHOPIFY_API_VERSION', '2026-04')
 
-# In-memory token store (fine for MVP; replace with DB later)
-shop_tokens = {}
+def normalize_shop(shop):
+    shop = (shop or '').strip().lower()
+    shop = re.sub(r'^https?://', '', shop).split('/')[0]
+    if shop and not shop.endswith('.myshopify.com'):
+        shop = f'{shop}.myshopify.com'
+    return shop
+
+def is_valid_shop(shop):
+    return bool(re.fullmatch(r'[a-z0-9][a-z0-9-]*\.myshopify\.com', shop or ''))
+
+def verify_shopify_hmac(args):
+    incoming_hmac = args.get('hmac', '')
+    if not incoming_hmac or not SHOPIFY_CLIENT_SECRET:
+        return False
+    pairs = []
+    for key in sorted(k for k in args.keys() if k not in ('hmac', 'signature')):
+        for value in args.getlist(key):
+            pairs.append(f'{key}={value}')
+    message = '&'.join(pairs)
+    digest = hmac.new(
+        SHOPIFY_CLIENT_SECRET.encode('utf-8'),
+        message.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(digest, incoming_hmac)
+
+def save_shop_token(shop, access_token, scope=''):
+    db_execute('''INSERT INTO shop_tokens (shop, access_token, scope, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(shop) DO UPDATE SET
+            access_token=excluded.access_token,
+            scope=excluded.scope,
+            updated_at=datetime('now')
+    ''', (shop, access_token, scope or ''))
+
+def get_shop_token(shop):
+    row = db_execute('SELECT access_token FROM shop_tokens WHERE shop=?', (shop,), fetchone=True)
+    return row[0] if row else ''
+
+def has_shop_token(shop):
+    return bool(get_shop_token(shop))
+
+def shopify_app_home_url(host):
+    if not host or not SHOPIFY_CLIENT_ID:
+        return ''
+    try:
+        padded = host + ('=' * (-len(host) % 4))
+        decoded = base64.urlsafe_b64decode(padded.encode('utf-8')).decode('utf-8')
+    except Exception:
+        return ''
+    if not (
+        decoded.startswith('admin.shopify.com/') or
+        re.fullmatch(r'[a-z0-9][a-z0-9-]*\.myshopify\.com/admin', decoded)
+    ):
+        return ''
+    return f'https://{decoded}/apps/{SHOPIFY_CLIENT_ID}/'
 
 REQUIRED_FIELDS = {
     "name":              {"label": "Product Name",              "weight": 5},
@@ -357,13 +465,13 @@ async function runScan() {
     });
     const data = await res.json();
     if (data.error) {
-      results.innerHTML = `<div class="error-box">Error: ${data.error}</div>`;
+      results.innerHTML = `<div class="error-banner">Error: ${escapeHtml(data.error)}</div>`;
     } else {
       lastData = data;
       renderResults(data);
     }
   } catch(e) {
-    results.innerHTML = '<div class="error-box">Could not connect to scanner. Make sure the store URL is correct.</div>';
+    results.innerHTML = '<div class="error-banner">Could not connect to scanner. Make sure the store URL is correct.</div>';
   }
   btn.disabled = false;
   btn.textContent = 'Scan Store';
@@ -373,6 +481,19 @@ function scoreClass(s) {
   if (s >= 70) return 'score-high';
   if (s >= 40) return 'score-mid';
   return 'score-low';
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function jsArg(value) {
+  return escapeHtml(JSON.stringify(value ?? ''));
 }
 
 function toggleFix(el) {
@@ -405,7 +526,7 @@ function renderResults(data) {
         el.innerHTML = '<span class="usage-badge paid">&#10003; Unlimited plan</span>';
       } else {
         const rem = u.remaining;
-        el.innerHTML = `<span class="usage-badge">${rem} free action${rem===1?'':'s'} remaining &mdash; <a href="#" onclick="showUpgradeModal('${s.store}');return false;" style="color:var(--yellow);text-decoration:underline;">Upgrade $9</a></span>`;
+        el.innerHTML = `<span class="usage-badge">${rem} free action${rem===1?'':'s'} remaining &mdash; <a href="#" onclick="showUpgradeModal(${jsArg(s.store)});return false;" style="color:var(--yellow);text-decoration:underline;">Upgrade $9</a></span>`;
       }
     }).catch(() => {});
 
@@ -432,7 +553,7 @@ function renderResults(data) {
         <div class="card-title">Most common issues across your store</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           ${s.has_token ? `<button class="btn-primary" onclick="bulkFix(this)">Fix All Products</button>` : ''}
-          <button class="btn-secondary" onclick="shareScore(${s.avg_score},'${s.store}')">Share Score</button>
+          <button class="btn-secondary" onclick="shareScore(${s.avg_score},${jsArg(s.store)})">Share Score</button>
           <button class="btn-secondary" onclick="downloadPDF()">Download PDF</button>
         </div>
       </div>
@@ -440,7 +561,7 @@ function renderResults(data) {
     for (const issue of s.top_issues) {
       const pct = Math.round((issue.count / maxCount) * 100);
       html += `<div class="issue-row">
-        <span class="issue-name">${issue.field}</span>
+        <span class="issue-name">${escapeHtml(issue.field)}</span>
         <div class="issue-bar-wrap"><div class="issue-bar" style="width:${pct}%"></div></div>
         <span class="issue-count">${issue.count} of ${s.total_products} products</span>
       </div>`;
@@ -464,7 +585,7 @@ function renderResults(data) {
       const hint = FIX_HINTS[f.label] || 'Add this field to improve AI discoverability';
       html += `<div class="fix-item">
         <span class="fix-pts">+${Math.round(f.weight)} pts</span>
-        <div><div class="fix-label">${f.label}</div><div class="fix-hint">${hint}</div></div>
+        <div><div class="fix-label">${escapeHtml(f.label)}</div><div class="fix-hint">${escapeHtml(hint)}</div></div>
       </div>`;
     }
     html += `</div></div>`;
@@ -485,7 +606,7 @@ function renderResults(data) {
     const sc = scoreClass(p.score);
     const passCount = p.present.length;
     const failCount = p.missing.length;
-    const sanitize = s => (s||'').replace(/['"|\n\r]/g,'').replace(/&[a-z]+;/g,'').slice(0,200);
+    const sanitize = s => (s||'').replace(/\n|\r/g,' ').replace(/&[a-z]+;/g,'').slice(0,200);
     const en = sanitize(p.name).slice(0,60);
     const eb = sanitize(p.brand).slice(0,40);
     const ed = sanitize(p.description);
@@ -493,8 +614,8 @@ function renderResults(data) {
 
     html += `<tr class="product-row" onclick="toggleRow(${idx})">
       <td>
-        <div class="product-name-cell">${p.name}<span class="expand-icon">&#9654;</span></div>
-        <div class="product-url-cell">${p.url}</div>
+        <div class="product-name-cell">${escapeHtml(p.name)}<span class="expand-icon">&#9654;</span></div>
+        <div class="product-url-cell">${escapeHtml(p.url)}</div>
       </td>
       <td><span class="score-pill ${sc}">${p.score}/100</span></td>
       <td><span style="color:var(--green);font-size:13px;font-weight:500;">${passCount} passed</span> &nbsp; <span style="color:var(--red);font-size:13px;">${failCount} missing</span></td>
@@ -503,20 +624,20 @@ function renderResults(data) {
       <td colspan="3" class="detail-cell">
         <div class="chips">`;
     for (const f of p.present) {
-      html += `<span class="chip chip-ok">${f}</span>`;
+      html += `<span class="chip chip-ok">${escapeHtml(f)}</span>`;
     }
     for (const f of p.missing) {
       const hint = FIX_HINTS[f.label] || 'Add this field to improve AI discoverability';
-      html += `<span class="chip chip-miss" title="${hint}">${f.label} - missing</span>`;
+      html += `<span class="chip chip-miss" title="${escapeHtml(hint)}">${escapeHtml(f.label)} - missing</span>`;
     }
     const pid = p.product_id || '';
     const pvendor = (p.vendor||'').split("'").join("");
     const hasToken = data.summary.has_token && pid;
     html += `</div>
         <div class="detail-actions">
-          <button class="btn-secondary" onclick="event.stopPropagation();analyzeContent(this,'${en}','${eb}','${ed}')">Analyze Content</button>
-          <button class="btn-primary" onclick="event.stopPropagation();generateDesc(this,'${en}','${eb}','${ed}','${ml}')">Generate AI Description</button>
-          ${hasToken && !p.vendor ? `<button class="btn-secondary" onclick="event.stopPropagation();autoFillBrand(this,'${pid}','${en}','${s.store}')">Auto-fill Brand</button>` : ''}
+          <button class="btn-secondary" onclick="event.stopPropagation();analyzeContent(this,${jsArg(en)},${jsArg(eb)},${jsArg(ed)})">Analyze Content</button>
+          <button class="btn-primary" onclick="event.stopPropagation();generateDesc(this,${jsArg(en)},${jsArg(eb)},${jsArg(ed)},${jsArg(ml)})">Generate AI Description</button>
+          ${hasToken && !p.vendor ? `<button class="btn-secondary" onclick="event.stopPropagation();autoFillBrand(this,${jsArg(pid)},${jsArg(en)},${jsArg(s.store)})">Auto-fill Brand</button>` : ''}
         </div>
         <div class="analyze-result" style="display:none;margin-top:12px;"></div>
         <div class="generate-result" style="display:none;margin-top:12px;"></div>
@@ -533,7 +654,7 @@ function renderResults(data) {
     <p>We scan your store every week and email you the score + what to fix.</p>
     <div class="email-row">
       <input type="email" id="subEmail" class="email-input" placeholder="your@email.com" />
-      <button class="btn-primary" onclick="subscribe('${shopDomain}')">Get Weekly Report</button>
+      <button class="btn-primary" onclick="subscribe(${jsArg(shopDomain)})">Get Weekly Report</button>
     </div>
     <div id="subMsg" style="margin-top:10px;font-size:13px;color:#95BF47;display:none;">Subscribed! You'll get your first report within a week.</div>
   </div>`;
@@ -578,7 +699,7 @@ async function analyzeContent(btn, name, brand, description) {
     });
     const data = await res.json();
     if (data.error) {
-      resultBox.innerHTML = `<div class="error-banner">${data.error}</div>`;
+      resultBox.innerHTML = `<div class="error-banner">${escapeHtml(data.error)}</div>`;
     } else {
       const sc = data.content_score >= 70 ? 'score-high' : data.content_score >= 40 ? 'score-mid' : 'score-low';
       let html = `<div class="ai-result"><div class="ai-result-header"><span>Content GEO Analysis</span></div><div class="ai-result-body">
@@ -591,14 +712,14 @@ async function analyzeContent(btn, name, brand, description) {
       if (data.issues && data.issues.length) {
         html += `<div class="ai-issues">`;
         for (const issue of data.issues) {
-          html += `<div class="ai-issue">&#9888; ${issue}</div>`;
+          html += `<div class="ai-issue">&#9888; ${escapeHtml(issue)}</div>`;
         }
         html += `</div>`;
       }
       if (data.suggestions && data.suggestions.length) {
         html += `<div style="font-size:12px;font-weight:600;color:var(--text-sub);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Suggestions</div>`;
         for (const sg of data.suggestions) {
-          html += `<div class="ai-sugg">&#8594; ${sg}</div>`;
+          html += `<div class="ai-sugg">&#8594; ${escapeHtml(sg)}</div>`;
         }
       }
       html += `</div></div>`;
@@ -635,7 +756,7 @@ async function generateDesc(btn, name, brand, description, missingLabels) {
       btn.disabled = false; btn.textContent = 'Generate AI Description'; return;
     }
     if (data.error) {
-      resultBox.innerHTML = `<div class="error-banner">${data.error}</div>`;
+      resultBox.innerHTML = `<div class="error-banner">${escapeHtml(data.error)}</div>`;
     } else {
       // Get product_id and shop from the row context
       const row = btn.closest('tr');
@@ -645,9 +766,8 @@ async function generateDesc(btn, name, brand, description, missingLabels) {
       const shop = lastData && lastData.summary ? lastData.summary.store : '';
       const hasToken = lastData && lastData.summary && lastData.summary.has_token;
 
-      const safeDesc = data.description.replace(/'/g,'').replace(/`/g,'');
       const saveBtn = (hasToken && productId)
-        ? `<button class="btn-primary" style="font-size:12px;padding:5px 14px;" onclick="saveToShopify(this,'${productId}','${shop}',this.closest('.ai-result').querySelector('.ai-result-body').textContent)">Save to Shopify</button>`
+        ? `<button class="btn-primary" style="font-size:12px;padding:5px 14px;" onclick="saveToShopify(this,${jsArg(productId)},${jsArg(shop)},this.closest('.ai-result').querySelector('.ai-result-body').textContent)">Save to Shopify</button>`
         : '';
       resultBox.innerHTML = `
         <div class="ai-result">
@@ -658,7 +778,7 @@ async function generateDesc(btn, name, brand, description, missingLabels) {
               ${saveBtn}
             </div>
           </div>
-          <div class="ai-result-body">${data.description}</div>
+          <div class="ai-result-body">${escapeHtml(data.description)}</div>
         </div>`;
     }
   } catch(e) {
@@ -731,6 +851,8 @@ async function bulkFix(btn) {
   btn.disabled = true;
   const total = products.length;
   let done = 0;
+  let saved = 0;
+  let failed = 0;
 
   const progressEl = document.getElementById('bulkProgress');
   if (progressEl) progressEl.style.display = 'block';
@@ -748,25 +870,44 @@ async function bulkFix(btn) {
           name: p.name,
           brand: p.brand || '',
           description: p.description || '',
-          missing: p.missing.map(f => f.label)
+          missing: p.missing.map(f => f.label),
+          shop
         })
       });
       const genData = await genRes.json();
+      if (genData.error === 'LIMIT_REACHED') {
+        showUpgradeModal(shop);
+        break;
+      }
       if (genData.description && p.product_id) {
-        await fetch('/api/update_product', {
+        const saveRes = await fetch('/api/update_product', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({product_id: p.product_id, shop, description: genData.description})
         });
+        const saveData = await saveRes.json();
+        if (saveData.error === 'LIMIT_REACHED') {
+          failed++;
+          showUpgradeModal(shop);
+          break;
+        } else if (saveData.success) {
+          saved++;
+        } else {
+          failed++;
+        }
+      } else {
+        failed++;
       }
-    } catch(e) {}
+    } catch(e) {
+      failed++;
+    }
     done++;
   }
 
   if (progressEl) progressEl.style.display = 'none';
   btn.disabled = false;
   btn.textContent = 'Fix All Products';
-  alert(`Done! Updated ${done} products in Shopify.`);
+  alert(`Done. Saved ${saved} products to Shopify${failed ? `; ${failed} failed` : ''}.`);
 }
 
 function showUpgradeModal(shop) {
@@ -1053,12 +1194,76 @@ def get_product_urls(store_url):
 
     return urls[:20]
 
+def has_value(value):
+    if value is None:
+        return False
+    if isinstance(value, (dict, list)):
+        return bool(value)
+    return bool(str(value).strip())
+
+def find_product_schema(data):
+    if isinstance(data, list):
+        for item in data:
+            found = find_product_schema(item)
+            if found:
+                return found
+        return None
+    if not isinstance(data, dict):
+        return None
+
+    schema_type = data.get('@type')
+    types = schema_type if isinstance(schema_type, list) else [schema_type]
+    if any(str(t).lower() == 'product' for t in types if t):
+        return data
+
+    for key in ('@graph', 'mainEntity', 'itemListElement', 'item'):
+        found = find_product_schema(data.get(key))
+        if found:
+            return found
+    return None
+
+def normalize_schema_value(value):
+    if isinstance(value, list):
+        return normalize_schema_value(value[0]) if value else ''
+    if isinstance(value, dict):
+        for key in ('name', 'url', 'src', '@id'):
+            if has_value(value.get(key)):
+                return value[key]
+    return value
+
+def normalize_product_schema(schema):
+    if not schema:
+        return None
+    schema = dict(schema)
+    for key in ('brand', 'image', 'color', 'size', 'material'):
+        if key in schema:
+            schema[key] = normalize_schema_value(schema[key])
+    return schema
+
+def merge_product_schema(primary, secondary):
+    merged = dict(primary or {})
+    for key, value in (secondary or {}).items():
+        if key == '@type':
+            continue
+        if has_value(value) and not has_value(merged.get(key)):
+            merged[key] = value
+
+    if isinstance((primary or {}).get('offers'), dict) and isinstance((secondary or {}).get('offers'), dict):
+        offers = dict(secondary['offers'])
+        offers.update({k: v for k, v in primary['offers'].items() if has_value(v)})
+        merged['offers'] = offers
+
+    merged['@type'] = 'Product'
+    return normalize_product_schema(merged)
+
 def extract_schema(url):
-    """Extract product data via Shopify JSON API or JSON-LD fallback."""
+    """Extract product data from Shopify JSON and page JSON-LD."""
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/html, */*',
     }
+    shopify_schema = None
+    jsonld_schema = None
 
     # Method 1: Shopify product JSON API (works even with JS-rendered themes)
     try:
@@ -1071,7 +1276,7 @@ def extract_schema(url):
                 variants = data.get('variants', [])
                 options = {o['name'].lower(): o.get('values', []) for o in data.get('options', [])}
                 images = data.get('images', [])
-                schema = {
+                shopify_schema = {
                     '@type': 'Product',
                     '_shopify_id': str(data.get('id', '')),
                     'name': data.get('title', ''),
@@ -1088,23 +1293,23 @@ def extract_schema(url):
                 for opt_name, values in options.items():
                     if values:
                         if 'color' in opt_name or 'colour' in opt_name:
-                            schema['color'] = values[0]
+                            shopify_schema['color'] = values[0]
                         elif 'size' in opt_name:
-                            schema['size'] = values[0]
+                            shopify_schema['size'] = values[0]
                         elif 'material' in opt_name or 'fabric' in opt_name:
-                            schema['material'] = values[0]
+                            shopify_schema['material'] = values[0]
                 # Check for GTIN/MPN in variants
                 for v in variants:
-                    if v.get('barcode'):
-                        schema['gtin'] = v['barcode']
+                    if not shopify_schema.get('gtin') and v.get('barcode'):
+                        shopify_schema['gtin'] = v['barcode']
+                    if not shopify_schema.get('mpn') and v.get('sku'):
+                        shopify_schema['mpn'] = v['sku']
+                    if shopify_schema.get('gtin') and shopify_schema.get('mpn'):
                         break
-                    if v.get('sku'):
-                        schema['mpn'] = v['sku']
-                return schema
     except Exception:
         pass
 
-    # Method 2: Parse JSON-LD from static HTML
+    # Method 2: Parse JSON-LD from static HTML and merge it with Shopify JSON.
     try:
         r = requests.get(url, headers=headers, timeout=12)
         if r.status_code == 200:
@@ -1113,17 +1318,16 @@ def extract_schema(url):
             for script in scripts:
                 try:
                     data = json.loads(script.string or '{}')
-                    if isinstance(data, list):
-                        for item in data:
-                            if item.get('@type') == 'Product':
-                                return item
-                    elif data.get('@type') == 'Product':
-                        return data
+                    jsonld_schema = find_product_schema(data)
+                    if jsonld_schema:
+                        break
                 except Exception:
                     continue
     except Exception:
         pass
 
+    if shopify_schema or jsonld_schema:
+        return merge_product_schema(shopify_schema, jsonld_schema)
     return None
 
 def check_field(schema, field):
@@ -1731,7 +1935,7 @@ def scan():
     store_domain = parsed.netloc or store_url
 
     # Check if this shop has an authenticated token
-    has_token = store_domain in shop_tokens
+    has_token = has_shop_token(normalize_shop(store_domain))
 
     return jsonify({
         'products': results,
@@ -1772,10 +1976,12 @@ def paypal_ipn():
     txn_id = unquote_plus(params.get('txn_id', ''))
     shop = unquote_plus(params.get('custom', '')).strip().lower()
     if payment_status == 'Completed' and shop:
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute('INSERT OR REPLACE INTO paid_shops (shop, paypal_txn_id) VALUES (?, ?)', (shop, txn_id))
-        conn.commit()
-        conn.close()
+        db_execute('''INSERT INTO paid_shops (shop, paypal_txn_id, paid_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(shop) DO UPDATE SET
+                paypal_txn_id=excluded.paypal_txn_id,
+                paid_at=datetime('now')
+        ''', (shop, txn_id))
     return 'OK', 200
 
 
@@ -1891,11 +2097,17 @@ No explanation, no markdown, just the JSON object."""
 
 @app.route('/install')
 def install():
-    shop = request.args.get('shop', '').strip()
+    shop = normalize_shop(request.args.get('shop', ''))
     if not shop:
         return 'Missing shop parameter.', 400
-    if not shop.endswith('.myshopify.com'):
-        shop = shop + '.myshopify.com'
+    if not is_valid_shop(shop):
+        return 'Invalid shop parameter.', 400
+    if request.args.get('hmac') and not verify_shopify_hmac(request.args):
+        return 'Invalid HMAC signature.', 403
+    if not SHOPIFY_CLIENT_ID or not SHOPIFY_CLIENT_SECRET:
+        return 'Shopify app credentials are not configured.', 500
+    if has_shop_token(shop):
+        return redirect(f'/app?shop={shop}')
     state = base64.b64encode(os.urandom(16)).decode('utf-8')
     session['oauth_state'] = state
     params = {
@@ -1910,13 +2122,19 @@ def install():
 
 @app.route('/auth/callback')
 def auth_callback():
-    shop = request.args.get('shop', '')
+    shop = normalize_shop(request.args.get('shop', ''))
     code = request.args.get('code', '')
     state = request.args.get('state', '')
 
+    if not is_valid_shop(shop):
+        return 'Invalid shop parameter.', 400
+    if not verify_shopify_hmac(request.args):
+        return 'Invalid HMAC signature.', 403
     # Verify state
     if state != session.get('oauth_state', ''):
         return 'Invalid state parameter.', 403
+    if not code:
+        return 'Missing authorization code.', 400
 
     # Exchange code for access token
     token_url = f"https://{shop}/admin/oauth/access_token"
@@ -1928,23 +2146,29 @@ def auth_callback():
     if resp.status_code != 200:
         return 'Failed to get access token.', 400
 
-    access_token = resp.json().get('access_token')
-    shop_tokens[shop] = access_token
+    token_data = resp.json()
+    access_token = token_data.get('access_token')
+    if not access_token:
+        return 'Missing access token from Shopify.', 400
+    save_shop_token(shop, access_token, token_data.get('scope', ''))
     session['shop'] = shop
 
     # Redirect back into the embedded app with shop param so it auto-scans
-    return redirect(f'https://{shop}/admin/apps/aiready?shop={shop}')
+    app_home = shopify_app_home_url(request.args.get('host', ''))
+    if app_home:
+        return redirect(app_home)
+    return redirect(f'/app?shop={shop}')
 
 
 @app.route('/api/products')
 def api_products():
     """Fetch products directly from Shopify Admin API using stored token."""
-    shop = request.args.get('shop', session.get('shop', ''))
-    if not shop or shop not in shop_tokens:
+    shop = normalize_shop(request.args.get('shop', session.get('shop', '')))
+    token = get_shop_token(shop)
+    if not shop or not token:
         return jsonify({'error': 'Not authenticated. Please install the app first.'}), 401
-    token = shop_tokens[shop]
     resp = requests.get(
-        f"https://{shop}/admin/api/2024-01/products.json?limit=20",
+        f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/products.json?limit=20",
         headers={'X-Shopify-Access-Token': token}
     )
     if resp.status_code != 200:
@@ -1956,18 +2180,18 @@ def api_products():
 def update_vendor():
     """Update product vendor/brand via Shopify Admin API."""
     data = request.get_json()
-    shop = data.get('shop', session.get('shop', ''))
+    shop = normalize_shop(data.get('shop', session.get('shop', '')))
     product_id = data.get('product_id')
     vendor = data.get('vendor', '')
 
-    if not shop or shop not in shop_tokens:
+    token = get_shop_token(shop)
+    if not shop or not token:
         return jsonify({'error': 'Not authenticated.'}), 401
     if not product_id:
         return jsonify({'error': 'Missing product_id.'}), 400
 
-    token = shop_tokens[shop]
     resp = requests.put(
-        f"https://{shop}/admin/api/2024-01/products/{product_id}.json",
+        f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/products/{product_id}.json",
         headers={'X-Shopify-Access-Token': token, 'Content-Type': 'application/json'},
         json={'product': {'id': product_id, 'vendor': vendor}}
     )
@@ -1980,11 +2204,12 @@ def update_vendor():
 def update_product():
     """Update a product description via Shopify Admin API."""
     data = request.get_json()
-    shop = data.get('shop', session.get('shop', ''))
+    shop = normalize_shop(data.get('shop', session.get('shop', '')))
     product_id = data.get('product_id')
     new_description = data.get('description', '')
 
-    if not shop or shop not in shop_tokens:
+    token = get_shop_token(shop)
+    if not shop or not token:
         return jsonify({'error': 'Not authenticated.'}), 401
     if not product_id:
         return jsonify({'error': 'Missing product_id.'}), 400
@@ -1995,9 +2220,8 @@ def update_product():
         if used >= FREE_LIMIT:
             return jsonify({'error': 'LIMIT_REACHED', 'used': used, 'limit': FREE_LIMIT}), 402
 
-    token = shop_tokens[shop]
     resp = requests.put(
-        f"https://{shop}/admin/api/2024-01/products/{product_id}.json",
+        f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/products/{product_id}.json",
         headers={'X-Shopify-Access-Token': token, 'Content-Type': 'application/json'},
         json={'product': {'id': product_id, 'body_html': new_description}}
     )
@@ -2017,14 +2241,7 @@ def request_unlock():
     shop = data.get('shop', '').strip().lower()
     if not email or not shop:
         return jsonify({'error': 'Email and shop required.'}), 400
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute('''CREATE TABLE IF NOT EXISTS unlock_requests (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT, shop TEXT, created_at TEXT DEFAULT (datetime('now'))
-    )''')
-    conn.execute('INSERT INTO unlock_requests (email, shop) VALUES (?, ?)', (email, shop))
-    conn.commit()
-    conn.close()
+    db_execute('INSERT INTO unlock_requests (email, shop) VALUES (?, ?)', (email, shop))
     return jsonify({'success': True})
 
 
@@ -2038,10 +2255,12 @@ def admin_unlock():
     shop = data.get('shop', '').strip().lower()
     if not shop:
         return jsonify({'error': 'shop required'}), 400
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute('INSERT OR REPLACE INTO paid_shops (shop, paypal_txn_id) VALUES (?, ?)', (shop, 'manual'))
-    conn.commit()
-    conn.close()
+    db_execute('''INSERT INTO paid_shops (shop, paypal_txn_id, paid_at)
+        VALUES (?, ?, datetime('now'))
+        ON CONFLICT(shop) DO UPDATE SET
+            paypal_txn_id=excluded.paypal_txn_id,
+            paid_at=datetime('now')
+    ''', (shop, 'manual'))
     return jsonify({'success': True, 'shop': shop})
 
 
@@ -2051,13 +2270,7 @@ def admin_requests():
     secret = request.headers.get('X-Admin-Secret', '')
     if secret != ADMIN_SECRET:
         return jsonify({'error': 'Unauthorized'}), 401
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute('''CREATE TABLE IF NOT EXISTS unlock_requests (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT, shop TEXT, created_at TEXT DEFAULT (datetime('now'))
-    )''')
-    rows = conn.execute('SELECT id, email, shop, created_at FROM unlock_requests ORDER BY created_at DESC').fetchall()
-    conn.close()
+    rows = db_execute('SELECT id, email, shop, created_at FROM unlock_requests ORDER BY created_at DESC', fetchall=True)
     return jsonify([{'id': r[0], 'email': r[1], 'shop': r[2], 'created_at': r[3]} for r in rows])
 
 
@@ -2069,10 +2282,9 @@ def subscribe():
     if not email or not shop:
         return jsonify({'error': 'Email and shop required.'}), 400
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute('INSERT OR IGNORE INTO subscriptions (email, shop) VALUES (?, ?)', (email, shop))
-        conn.commit()
-        conn.close()
+        db_execute('''INSERT INTO subscriptions (email, shop) VALUES (?, ?)
+            ON CONFLICT(email, shop) DO NOTHING
+        ''', (email, shop))
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2085,9 +2297,7 @@ def run_weekly_scan():
     if secret != CRON_SECRET:
         return jsonify({'error': 'Unauthorized'}), 401
 
-    conn = sqlite3.connect(DB_PATH)
-    subs = conn.execute('SELECT id, email, shop, last_score FROM subscriptions').fetchall()
-    conn.close()
+    subs = db_execute('SELECT id, email, shop, last_score FROM subscriptions', fetchall=True)
 
     sent = 0
     for sub_id, email, shop, last_score in subs:
@@ -2162,10 +2372,7 @@ def run_weekly_scan():
                 )
 
             # Update last_score
-            conn = sqlite3.connect(DB_PATH)
-            conn.execute('UPDATE subscriptions SET last_score=?, last_scanned=datetime("now") WHERE id=?', (avg, sub_id))
-            conn.commit()
-            conn.close()
+            db_execute('UPDATE subscriptions SET last_score=?, last_scanned=CURRENT_TIMESTAMP WHERE id=?', (avg, sub_id))
             sent += 1
         except Exception:
             continue
