@@ -318,6 +318,7 @@ HTML_TEMPLATE = """
     document.getElementById('storeUrl').value = shop;
   } else if (prefill && prefill !== '{{ prefill_url }}') {
     document.getElementById('storeUrl').value = prefill;
+    setTimeout(runScan, 100);
   }
 })();
 
@@ -484,10 +485,11 @@ function renderResults(data) {
     const sc = scoreClass(p.score);
     const passCount = p.present.length;
     const failCount = p.missing.length;
-    const en = (p.name||'').split("'").join("").split('"').join('').slice(0,60);
-    const eb = (p.brand||'').split("'").join("").slice(0,40);
-    const ed = (p.description||'').split("'").join("").slice(0,200);
-    const ml = p.missing.map(f => f.label).join('|');
+    const sanitize = s => (s||'').replace(/['"`\n\r]/g,'').replace(/&[a-z]+;/g,'').slice(0,200);
+    const en = sanitize(p.name).slice(0,60);
+    const eb = sanitize(p.brand).slice(0,40);
+    const ed = sanitize(p.description);
+    const ml = p.missing.map(f => f.label.replace(/['"`]/g,'')).join('|');
 
     html += `<tr class="product-row" onclick="toggleRow(${idx})">
       <td>
