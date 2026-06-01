@@ -485,7 +485,7 @@ function renderResults(data) {
     const sc = scoreClass(p.score);
     const passCount = p.present.length;
     const failCount = p.missing.length;
-    const sanitize = s => (s||'').replace(/['"`\n\r]/g,'').replace(/&[a-z]+;/g,'').slice(0,200);
+    const sanitize = s => (s||'').replace(/['"|\n\r]/g,'').replace(/&[a-z]+;/g,'').slice(0,200);
     const en = sanitize(p.name).slice(0,60);
     const eb = sanitize(p.brand).slice(0,40);
     const ed = sanitize(p.description);
