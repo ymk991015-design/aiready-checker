@@ -9,6 +9,7 @@ import hashlib
 import base64
 import sqlite3
 from urllib.parse import urljoin, urlparse, urlencode
+from concurrent.futures import ThreadPoolExecutor
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET', 'aiready-secret-key-2025')
@@ -939,10 +940,10 @@ function downloadPDF() {
 document.getElementById('storeUrl').addEventListener('keydown', e => {
   if (e.key === 'Enter') runScan();
 });
-(function() {
+window.addEventListener('load', function() {
   var u = new URLSearchParams(window.location.search).get('url');
   if (u) { document.getElementById('storeUrl').value = u; runScan(); }
-})();
+});
 </script>
 
 <!-- UPGRADE MODAL -->
@@ -1690,14 +1691,13 @@ def scan():
     product_urls = get_product_urls(store_url)
     if not product_urls:
         return jsonify({'error': 'Could not find products. Make sure the store URL is correct and the store is live.'})
-    results = []
-    for url in product_urls:
+    def scan_one(url):
         schema = extract_schema(url)
         if not schema:
-            continue
+            return None
         score, present, missing = score_product(schema)
         name = schema.get('name', url.split('/')[-1].replace('-', ' ').title())
-        results.append({
+        return {
             'url': url,
             'name': name,
             'score': score,
@@ -1707,7 +1707,10 @@ def scan():
             'brand': schema.get('brand', '') or schema.get('vendor', ''),
             'product_id': schema.get('_shopify_id', ''),
             'vendor': schema.get('brand', ''),
-        })
+        }
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        raw = list(executor.map(scan_one, product_urls))
+    results = [r for r in raw if r is not None]
     if not results:
         return jsonify({'error': 'Could not extract schema from product pages. The store may require JavaScript rendering.'})
 
