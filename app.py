@@ -1102,7 +1102,7 @@ window.addEventListener('load', function() {
       <div class="modal-feature">&#10003; &nbsp; Weekly score reports via email</div>
     </div>
     <div id="modalStep1">
-      <button class="btn-primary" style="width:100%;padding:14px;font-size:15px;" onclick="window.open('https://paypal.me/MingkunYang/9','_blank');showPaidStep();">Pay $9 via PayPal &rarr;</button>
+      <a class="btn-primary" style="width:100%;padding:14px;font-size:15px;display:block;text-align:center;text-decoration:none;box-sizing:border-box;" href="https://paypal.me/MingkunYang/9" target="_blank" rel="noopener noreferrer" onclick="showPaidStep()">Pay $9 via PayPal &rarr;</a>
     </div>
     <div id="modalStep2" style="display:none;margin-top:16px;">
       <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Enter your PayPal email so we can verify and unlock your store:</p>
@@ -1119,6 +1119,43 @@ window.addEventListener('load', function() {
 </html>
 """
 
+def schema_from_shopify_product(data):
+    """Flatten Shopify product JSON into schema-like structure."""
+    if not data:
+        return None
+    variants = data.get('variants', [])
+    options = {o['name'].lower(): o.get('values', []) for o in data.get('options', [])}
+    images = data.get('images', [])
+    shopify_schema = {
+        '@type': 'Product',
+        '_shopify_id': str(data.get('id', '')),
+        'name': data.get('title', ''),
+        'description': data.get('body_html', ''),
+        'image': images[0].get('src') if images else None,
+        'brand': data.get('vendor', ''),
+        'sku': variants[0].get('sku', '') if variants else '',
+        'offers': {
+            'price': variants[0].get('price') if variants else None,
+            'availability': 'InStock' if any(v.get('available') for v in variants) else 'OutOfStock',
+        } if variants else None,
+    }
+    for opt_name, values in options.items():
+        if values:
+            if 'color' in opt_name or 'colour' in opt_name:
+                shopify_schema['color'] = values[0]
+            elif 'size' in opt_name:
+                shopify_schema['size'] = values[0]
+            elif 'material' in opt_name or 'fabric' in opt_name:
+                shopify_schema['material'] = values[0]
+    for v in variants:
+        if not shopify_schema.get('gtin') and v.get('barcode'):
+            shopify_schema['gtin'] = v['barcode']
+        if not shopify_schema.get('mpn') and v.get('sku'):
+            shopify_schema['mpn'] = v['sku']
+        if shopify_schema.get('gtin') and shopify_schema.get('mpn'):
+            break
+    return shopify_schema
+
 def get_product_urls(store_url):
     """Get product URLs from Shopify store using multiple methods."""
     base = store_url.rstrip('/')
@@ -1130,6 +1167,7 @@ def get_product_urls(store_url):
         'Accept-Language': 'en-US,en;q=0.5',
     }
     urls = []
+    products_data = []
 
     # Method 1: products.json (most reliable)
     try:
@@ -1140,6 +1178,9 @@ def get_product_urls(store_url):
                 handle = p.get('handle', '')
                 if handle:
                     urls.append(f"{base}/products/{handle}")
+                    products_data.append(p)
+            if urls:
+                return urls[:20], products_data[:20]
     except Exception:
         pass
 
@@ -1192,7 +1233,7 @@ def get_product_urls(store_url):
         except Exception:
             pass
 
-    return urls[:20]
+    return urls[:20], products_data[:20]
 
 def has_value(value):
     if value is None:
@@ -1270,61 +1311,27 @@ def extract_schema(url):
         json_url = url.rstrip('/') + '.json'
         r = requests.get(json_url, headers=headers, timeout=12)
         if r.status_code == 200:
-            data = r.json().get('product', {})
-            if data:
-                # Flatten Shopify product data into schema-like structure
-                variants = data.get('variants', [])
-                options = {o['name'].lower(): o.get('values', []) for o in data.get('options', [])}
-                images = data.get('images', [])
-                shopify_schema = {
-                    '@type': 'Product',
-                    '_shopify_id': str(data.get('id', '')),
-                    'name': data.get('title', ''),
-                    'description': data.get('body_html', ''),
-                    'image': images[0].get('src') if images else None,
-                    'brand': data.get('vendor', ''),
-                    'sku': variants[0].get('sku', '') if variants else '',
-                    'offers': {
-                        'price': variants[0].get('price') if variants else None,
-                        'availability': 'InStock' if any(v.get('available') for v in variants) else 'OutOfStock',
-                    } if variants else None,
-                }
-                # Map option names to schema fields
-                for opt_name, values in options.items():
-                    if values:
-                        if 'color' in opt_name or 'colour' in opt_name:
-                            shopify_schema['color'] = values[0]
-                        elif 'size' in opt_name:
-                            shopify_schema['size'] = values[0]
-                        elif 'material' in opt_name or 'fabric' in opt_name:
-                            shopify_schema['material'] = values[0]
-                # Check for GTIN/MPN in variants
-                for v in variants:
-                    if not shopify_schema.get('gtin') and v.get('barcode'):
-                        shopify_schema['gtin'] = v['barcode']
-                    if not shopify_schema.get('mpn') and v.get('sku'):
-                        shopify_schema['mpn'] = v['sku']
-                    if shopify_schema.get('gtin') and shopify_schema.get('mpn'):
-                        break
+            shopify_schema = schema_from_shopify_product(r.json().get('product', {}))
     except Exception:
         pass
 
     # Method 2: Parse JSON-LD from static HTML and merge it with Shopify JSON.
-    try:
-        r = requests.get(url, headers=headers, timeout=12)
-        if r.status_code == 200:
-            soup = BeautifulSoup(r.text, 'html.parser')
-            scripts = soup.find_all('script', type='application/ld+json')
-            for script in scripts:
-                try:
-                    data = json.loads(script.string or '{}')
-                    jsonld_schema = find_product_schema(data)
-                    if jsonld_schema:
-                        break
-                except Exception:
-                    continue
-    except Exception:
-        pass
+    if not shopify_schema:
+        try:
+            r = requests.get(url, headers=headers, timeout=12)
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, 'html.parser')
+                scripts = soup.find_all('script', type='application/ld+json')
+                for script in scripts:
+                    try:
+                        data = json.loads(script.string or '{}')
+                        jsonld_schema = find_product_schema(data)
+                        if jsonld_schema:
+                            break
+                    except Exception:
+                        continue
+        except Exception:
+            pass
 
     if shopify_schema or jsonld_schema:
         return merge_product_schema(shopify_schema, jsonld_schema)
@@ -1892,11 +1899,16 @@ def scan():
     store_url = data.get('url', '').strip()
     if not store_url:
         return jsonify({'error': 'Please provide a store URL.'})
-    product_urls = get_product_urls(store_url)
+    product_urls, products_json = get_product_urls(store_url)
     if not product_urls:
         return jsonify({'error': 'Could not find products. Make sure the store URL is correct and the store is live.'})
+    products_by_handle = {p['handle']: p for p in products_json if p.get('handle')}
     def scan_one(url):
-        schema = extract_schema(url)
+        handle = url.rstrip('/').split('/')[-1]
+        if handle in products_by_handle:
+            schema = schema_from_shopify_product(products_by_handle[handle])
+        else:
+            schema = extract_schema(url)
         if not schema:
             return None
         score, present, missing = score_product(schema)
