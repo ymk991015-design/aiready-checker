@@ -606,7 +606,7 @@ function renderResults(data) {
     const sc = scoreClass(p.score);
     const passCount = p.present.length;
     const failCount = p.missing.length;
-    const sanitize = s => (s||'').replace(/[\x00-\x1F&<>"']/g,' ').slice(0,200);
+    const sanitize = s => String(s||'').replace(/['"><]/g,' ').slice(0,200);
     const en = sanitize(p.name).slice(0,60);
     const eb = sanitize(p.brand).slice(0,40);
     const ed = sanitize(p.description);
