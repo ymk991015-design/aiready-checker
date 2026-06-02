@@ -1102,7 +1102,7 @@ window.addEventListener('load', function() {
       <div class="modal-feature">&#10003; &nbsp; Weekly score reports via email</div>
     </div>
     <div id="modalStep1">
-      <a href="https://paypal.me/MingkunYang/9" target="_blank" class="btn-primary" style="display:block;padding:14px;font-size:15px;text-decoration:none;" onclick="showPaidStep()">Pay $9 via PayPal &rarr;</a>
+      <button class="btn-primary" style="width:100%;padding:14px;font-size:15px;" onclick="window.open('https://paypal.me/MingkunYang/9','_blank');showPaidStep();">Pay $9 via PayPal &rarr;</button>
     </div>
     <div id="modalStep2" style="display:none;margin-top:16px;">
       <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Enter your PayPal email so we can verify and unlock your store:</p>
