@@ -485,7 +485,7 @@ HTML_TEMPLATE = """
     <div id="modalStep2" style="display:none;margin-top:16px;">
       <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Enter the PayPal email you used to pay ${{ usd_price }}:</p>
       <input type="email" id="unlockEmail" class="scan-input" placeholder="your@paypal.email" style="margin-bottom:8px;" />
-      <button type="button" id="btnConfirmUnlock" class="btn-primary" style="width:100%;padding:12px;">Confirm payment &amp; unlock</button>
+      <button type="button" id="btnConfirmUnlock" class="btn-primary" style="width:100%;padding:12px;">Submit payment email</button>
       <div id="unlockMsg" style="margin-top:10px;font-size:13px;display:none;"></div>
     </div>
     <input type="hidden" id="paypalShop" value="{{ shop_prefill or '' }}">
@@ -595,17 +595,18 @@ async function submitUnlockRequest() {
       msg.style.display = 'block';
       msg.style.color = 'var(--red)';
       msg.textContent = data.error;
-      if (btn) { btn.disabled = false; btn.textContent = 'Confirm payment & unlock'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Submit payment email'; }
       return;
     }
     msg.style.display = 'block';
     msg.style.color = 'var(--green)';
-    msg.textContent = 'Unlocked! Redirecting...';
+    msg.textContent = 'Request received. We will verify your PayPal payment and unlock your store shortly.';
+    if (btn) { btn.disabled = false; btn.textContent = 'Submit payment email'; }
   } catch(e) {
     msg.style.display = 'block';
     msg.style.color = 'var(--red)';
     msg.textContent = 'Error sending request. Please email us directly.';
-    if (btn) { btn.disabled = false; btn.textContent = 'Confirm payment & unlock'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Submit payment email'; }
   }
 }
 function bindPaywallButtons() {
@@ -2807,7 +2808,7 @@ ADMIN_SECRET = os.environ.get('ADMIN_SECRET', 'aiready-admin-2025')
 
 @app.route('/request-unlock', methods=['POST'])
 def request_unlock():
-    """User confirms PayPal payment; unlock store and redirect to unlimited app."""
+    """User submits PayPal payment details for manual verification."""
     data = request.get_json() or {}
     email = data.get('email', '').strip().lower()
     shop = normalize_shop(data.get('shop', ''))
@@ -2817,15 +2818,7 @@ def request_unlock():
         return jsonify({'error': 'Invalid store URL. Use your myshopify.com domain.'}), 400
     note = f'[paypal] {email}'
     db_execute('INSERT INTO unlock_requests (email, shop) VALUES (?, ?)', (note, shop))
-    if not is_paid(shop):
-        db_execute('''INSERT INTO paid_shops (shop, paypal_txn_id, paid_at)
-            VALUES (?, ?, datetime('now'))
-            ON CONFLICT(shop) DO UPDATE SET
-                paypal_txn_id=excluded.paypal_txn_id,
-                paid_at=datetime('now')
-        ''', (shop, 'paypal-confirm'))
-    redirect_url = f'{APP_BASE_URL}/app?shop={shop}&unlocked=1'
-    return jsonify({'success': True, 'redirect': redirect_url})
+    return jsonify({'success': True})
 
 
 @app.route('/admin/unlock', methods=['POST'])
