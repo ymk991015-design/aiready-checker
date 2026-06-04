@@ -432,10 +432,10 @@ HTML_TEMPLATE = """
   </div>
 
   <div class="scan-card">
-    <div class="scan-row">
-      <input type="text" class="scan-input" id="storeUrl" placeholder="yourstore.myshopify.com or yourstore.com" />
-      <button class="btn-primary" id="scanBtn" onclick="runScan()">Scan Store</button>
-    </div>
+    <form class="scan-row" id="scanForm" onsubmit="event.preventDefault(); runScan(); return false;">
+      <input type="text" class="scan-input" id="storeUrl" name="url" placeholder="yourstore.myshopify.com or yourstore.com" />
+      <button type="submit" class="btn-primary" id="scanBtn">Scan Store</button>
+    </form>
   </div>
 
   <div id="unlimitedBanner" style="display:none;" class="success-banner"></div>
@@ -443,23 +443,46 @@ HTML_TEMPLATE = """
 
 </div><!-- end .page -->
 
-<script>
-// Detect shop or prefilled URL from params
-(function() {
-  var params = new URLSearchParams(window.location.search);
-  var shop = params.get('shop');
-  var urlParam = params.get('url');
-  if (shop) {
-    var banner = document.getElementById('shopBanner');
-    var label = document.getElementById('shopLabel');
-    if (banner) banner.classList.add('visible');
-    if (label) label.textContent = shop;
-    document.getElementById('storeUrl').value = shop;
-  } else if (urlParam) {
-    document.getElementById('storeUrl').value = urlParam;
-  }
-})();
+<!-- UPGRADE MODAL -->
+<div class="modal-overlay{% if open_upgrade %} visible{% endif %}" id="upgradeModal">
+  <div class="modal-box">
+    <div class="modal-icon">&#128274;</div>
+    <div class="modal-title">{% if open_upgrade %}Upgrade to Unlimited{% else %}You've used your 5 free actions{% endif %}</div>
+    <div class="modal-sub">{% if open_upgrade %}One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.{% else %}Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.{% endif %}</div>
+    <div class="modal-price">${{ usd_price }}</div>
+    <div class="modal-price-sub">one-time via PayPal &mdash; unlimited forever</div>
+    <div class="pay-store-row">
+      <label class="pay-amount-label">店铺域名 Store URL <span style="color:#D72C0D">*</span></label>
+      <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="document.getElementById('paypalShop').value=this.value" />
+    </div>
+    <div class="modal-features">
+      <div class="modal-feature">&#10003; &nbsp; Unlimited AI description generation</div>
+      <div class="modal-feature">&#10003; &nbsp; Save directly to Shopify</div>
+      <div class="modal-feature">&#10003; &nbsp; Bulk fix all products at once</div>
+      <div class="modal-feature">&#10003; &nbsp; Weekly score reports via email</div>
+    </div>
+    <div id="modalStep1">
+      <form id="paypalForm" class="paypal-form" action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top" onsubmit="return handlePayPalSubmit(event)">
+        <input type="hidden" name="cmd" value="_s-xclick" />
+        <input type="hidden" name="hosted_button_id" value="{{ paypal_hosted_button_id }}" />
+        <input type="hidden" name="currency_code" value="USD" />
+        <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_buynowCC_LG.gif" border="0" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Buy Now" style="width:100%;max-width:240px;height:auto;" />
+      </form>
+      <div class="pay-amount-hint">Fixed ${{ usd_price }} USD via PayPal. You will return here after payment.</div>
+      <button type="button" class="pay-done-btn" onclick="showPaidStep()">I paid on PayPal &rarr;</button>
+    </div>
+    <div id="modalStep2" style="display:none;margin-top:16px;">
+      <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Enter the PayPal email you used to pay $9:</p>
+      <input type="email" id="unlockEmail" class="scan-input" placeholder="your@paypal.email" style="margin-bottom:8px;" />
+      <button class="btn-primary" style="width:100%;padding:12px;" onclick="submitUnlockRequest()">Confirm payment &amp; unlock</button>
+      <div id="unlockMsg" style="margin-top:10px;font-size:13px;display:none;"></div>
+    </div>
+    <input type="hidden" id="paypalShop" value="{{ shop_prefill or '' }}">
+    <div class="modal-close" onclick="closeUpgradeModal()">Maybe later</div>
+  </div>
+</div>
 
+<script>
 function runShopScan() {
   runScan();
 }
@@ -487,6 +510,10 @@ async function runScan() {
     if (input) { input.focus(); input.style.borderColor = '#D72C0D'; }
     return;
   }
+  if (input) input.style.borderColor = '';
+  try {
+    history.replaceState(null, '', '/app?url=' + encodeURIComponent(url));
+  } catch (e) {}
   const btn = document.getElementById('scanBtn');
   const results = document.getElementById('results');
   if (!btn || !results) return;
@@ -1182,81 +1209,58 @@ function downloadPDF() {
   doc.save('aiready-report-' + s.store + '-' + date.split('/').join('-') + '.pdf');
 }
 
-document.getElementById('storeUrl').addEventListener('keydown', e => {
-  if (e.key === 'Enter') runScan();
-});
-window.addEventListener('load', function() {
+function initApp() {
   var params = new URLSearchParams(window.location.search);
-  var u = params.get('url');
-  var isPaywall = params.get('upgrade') === '1' || window.location.pathname === '/upgrade';
-  if (u && !isPaywall) { document.getElementById('storeUrl').value = u; runScan(); }
-  else if (u) { document.getElementById('storeUrl').value = u; }
-  if (isPaywall) {
-    var shop = params.get('shop') || document.getElementById('storeUrl').value.trim() || '';
-    showUpgradeModal(shop);
+  var urlParam = params.get('url');
+  var shop = params.get('shop');
+  var storeInput = document.getElementById('storeUrl');
+  if (shop && storeInput) {
+    var banner = document.getElementById('shopBanner');
+    var label = document.getElementById('shopLabel');
+    if (banner) banner.classList.add('visible');
+    if (label) label.textContent = shop;
+    storeInput.value = shop;
+  } else if (urlParam && storeInput) {
+    storeInput.value = urlParam;
   }
+  var path = window.location.pathname;
+  var isPaywall = path === '/upgrade' || params.get('upgrade') === '1';
   if (params.get('paypal') === 'return') {
-    var shop = params.get('shop') || document.getElementById('storeUrl').value.trim() || '';
-    showUpgradeModal(shop);
+    showUpgradeModal(shop || (storeInput && storeInput.value.trim()) || '');
     showPaidStep();
+    return;
   }
   if (params.get('unlocked') === '1') {
-    var shop = params.get('shop') || '';
+    shop = shop || '';
     var banner = document.getElementById('unlimitedBanner');
     if (banner) {
       banner.style.display = 'block';
       banner.innerHTML = '&#10003; <strong>Unlimited plan active</strong> &mdash; unlimited AI fixes for ' + (shop ? escapeHtml(shop) : 'your store');
     }
-    if (shop) {
-      document.getElementById('storeUrl').value = shop;
+    if (shop && storeInput) {
+      storeInput.value = shop;
       var storeEl = document.getElementById('upgradeStoreUrl');
       if (storeEl) storeEl.value = shop;
       document.getElementById('paypalShop').value = shop;
     }
     closeUpgradeModal();
     if (shop && !document.getElementById('results').innerHTML) runScan();
+    return;
   }
-});
+  if (isPaywall) {
+    showUpgradeModal(shop || (storeInput && storeInput.value.trim()) || '');
+    return;
+  }
+  if (urlParam) {
+    runScan();
+  }
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
 </script>
-
-<!-- UPGRADE MODAL -->
-<div class="modal-overlay{% if open_upgrade %} visible{% endif %}" id="upgradeModal">
-  <div class="modal-box">
-    <div class="modal-icon">&#128274;</div>
-    <div class="modal-title">{% if open_upgrade %}Upgrade to Unlimited{% else %}You've used your 5 free actions{% endif %}</div>
-    <div class="modal-sub">{% if open_upgrade %}One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.{% else %}Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.{% endif %}</div>
-    <div class="modal-price">${{ usd_price }}</div>
-    <div class="modal-price-sub">one-time via PayPal &mdash; unlimited forever</div>
-    <div class="pay-store-row">
-      <label class="pay-amount-label">店铺域名 Store URL <span style="color:#D72C0D">*</span></label>
-      <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="document.getElementById('paypalShop').value=this.value" />
-    </div>
-    <div class="modal-features">
-      <div class="modal-feature">&#10003; &nbsp; Unlimited AI description generation</div>
-      <div class="modal-feature">&#10003; &nbsp; Save directly to Shopify</div>
-      <div class="modal-feature">&#10003; &nbsp; Bulk fix all products at once</div>
-      <div class="modal-feature">&#10003; &nbsp; Weekly score reports via email</div>
-    </div>
-    <div id="modalStep1">
-      <form id="paypalForm" class="paypal-form" action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top" onsubmit="return handlePayPalSubmit(event)">
-        <input type="hidden" name="cmd" value="_s-xclick" />
-        <input type="hidden" name="hosted_button_id" value="{{ paypal_hosted_button_id }}" />
-        <input type="hidden" name="currency_code" value="USD" />
-        <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_buynowCC_LG.gif" border="0" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Buy Now" style="width:100%;max-width:240px;height:auto;" />
-      </form>
-      <div class="pay-amount-hint">Fixed ${{ usd_price }} USD via PayPal. You will return here after payment.</div>
-      <button type="button" class="pay-done-btn" onclick="showPaidStep()">I paid on PayPal &rarr;</button>
-    </div>
-    <div id="modalStep2" style="display:none;margin-top:16px;">
-      <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Enter the PayPal email you used to pay $9:</p>
-      <input type="email" id="unlockEmail" class="scan-input" placeholder="your@paypal.email" style="margin-bottom:8px;" />
-      <button class="btn-primary" style="width:100%;padding:12px;" onclick="submitUnlockRequest()">Confirm payment &amp; unlock</button>
-      <div id="unlockMsg" style="margin-top:10px;font-size:13px;display:none;"></div>
-    </div>
-    <input type="hidden" id="paypalShop" value="{{ shop_prefill or '' }}">
-    <div class="modal-close" onclick="closeUpgradeModal()">Maybe later</div>
-  </div>
-</div>
 
 </body>
 </html>
@@ -1575,7 +1579,8 @@ LANDING_TEMPLATE = """
     .hero h1 { font-size:clamp(28px,5vw,52px); font-weight:800; line-height:1.15; letter-spacing:-1px; margin-bottom:18px; }
     .hero h1 em { color:var(--green); font-style:normal; }
     .hero-sub { font-size:18px; color:var(--text-sub); max-width:560px; margin:0 auto 36px; line-height:1.6; }
-    .hero-input-row { display:flex; gap:10px; max-width:520px; margin:0 auto 14px; }
+    .hero-input-row { display:flex; gap:10px; max-width:520px; margin:0 auto 14px; border:none; padding:0; background:transparent; }
+    .hero-input-row .btn-hero { border:none; cursor:pointer; }
     .hero-input { flex:1; border:2px solid var(--border); border-radius:8px; padding:13px 16px; font-size:15px; outline:none; transition:border-color 0.15s; }
     .hero-input:focus { border-color:var(--green); }
     .btn-hero { background:var(--green); color:#fff; border:none; padding:13px 28px; border-radius:8px; font-size:15px; font-weight:700; cursor:pointer; white-space:nowrap; }
@@ -1702,13 +1707,13 @@ LANDING_TEMPLATE = """
   <h1 class="zh">你的店铺对 ChatGPT <em>隐形</em>吗？</h1>
   <p class="hero-sub en">AI engines are replacing Google search. If your Shopify products lack structured data, they won't get recommended. Check your store free in 30 seconds.</p>
   <p class="hero-sub zh">AI 引擎正在取代 Google 搜索。如果你的 Shopify 产品缺少结构化数据，AI 就不会推荐你的产品。30 秒免费扫描，立即找出问题。</p>
-  <div class="hero-input-row">
-    <input type="text" class="hero-input" id="heroUrl" placeholder="yourstore.myshopify.com" />
-    <button class="btn-hero" onclick="goScan()">
+  <form class="hero-input-row" action="/app" method="get">
+    <input type="text" class="hero-input" id="heroUrl" name="url" placeholder="yourstore.myshopify.com" required />
+    <button type="submit" class="btn-hero">
       <span class="en">Scan Free</span>
       <span class="zh">免费扫描</span>
     </button>
-  </div>
+  </form>
   <p class="hero-hint en">No signup required &mdash; scan up to 20 products for free</p>
   <p class="hero-hint zh">无需注册 &mdash; 免费扫描最多 20 个产品</p>
 </section>
