@@ -10,6 +10,7 @@ import base64
 import sqlite3
 import tempfile
 import time
+import html
 from urllib.parse import urljoin, urlparse, urlencode, unquote_plus
 from concurrent.futures import ThreadPoolExecutor
 
@@ -17,6 +18,7 @@ app = Flask(__name__, static_folder='static', static_url_path='/static')
 app.secret_key = os.environ.get('FLASK_SECRET', 'aiready-secret-key-2025')
 
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+REPORT_FROM_EMAIL = os.environ.get('REPORT_FROM_EMAIL', 'AiReady <onboarding@resend.dev>')
 CRON_SECRET = os.environ.get('CRON_SECRET', 'aiready-cron-2025')
 USD_PRICE = float(os.environ.get('USD_PRICE', '9'))
 PAYPAL_HOSTED_BUTTON_ID = os.environ.get('PAYPAL_HOSTED_BUTTON_ID', 'VA8TFCR6A8NMY')
@@ -126,6 +128,76 @@ def increment_usage(shop):
             ON CONFLICT(shop) DO UPDATE SET count=count+1, updated_at=datetime('now')
         '''
     db_execute(sql, (shop,))
+
+def is_valid_email(email):
+    return bool(re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', email or ''))
+
+def send_scan_report_email(email, shop, summary=None, products=None):
+    if not RESEND_API_KEY:
+        return False
+
+    summary = summary or {}
+    products = products or []
+    avg_score = summary.get('avg_score', 0)
+    top_issues = summary.get('top_issues') or []
+    score_color = '#008060' if avg_score >= 70 else '#B98900' if avg_score >= 40 else '#D72C0D'
+
+    issue_rows = ''.join(
+        f"<li>{html.escape(str(issue.get('field', 'Issue')))} "
+        f"<span style='color:#6D7175;'>({int(issue.get('count', 0))} products)</span></li>"
+        for issue in top_issues[:5] if isinstance(issue, dict)
+    ) or '<li>No major missing fields found.</li>'
+
+    product_rows = ''.join(
+        "<tr>"
+        f"<td style='padding:8px;border-bottom:1px solid #eee;'>{html.escape(str(p.get('name', 'Product'))[:70])}</td>"
+        f"<td style='padding:8px;border-bottom:1px solid #eee;font-weight:700;color:{'#008060' if int(p.get('score', 0)) >= 70 else '#B98900' if int(p.get('score', 0)) >= 40 else '#D72C0D'};'>{int(p.get('score', 0))}/100</td>"
+        f"<td style='padding:8px;border-bottom:1px solid #eee;color:#6D7175;font-size:12px;'>{html.escape(', '.join((p.get('missing') or [])[:4]))}</td>"
+        "</tr>"
+        for p in products[:10] if isinstance(p, dict)
+    ) or "<tr><td colspan='3' style='padding:8px;color:#6D7175;'>Scan details are available on AiReady.</td></tr>"
+
+    safe_shop = html.escape(shop)
+    report_url = f"{APP_BASE_URL}/app?url={safe_shop}&source=email_report"
+    html_body = f"""
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:640px;margin:0 auto;color:#202223;">
+  <div style="background:#1A1A1A;padding:18px 22px;border-radius:8px 8px 0 0;">
+    <span style="color:#fff;font-size:18px;font-weight:700;">Ai<span style="color:#95BF47;">Ready</span></span>
+    <span style="color:#999;font-size:13px;margin-left:12px;">AI Readiness Report</span>
+  </div>
+  <div style="border:1px solid #E4E5E7;border-top:none;padding:22px;border-radius:0 0 8px 8px;">
+    <h2 style="margin:0 0 6px;font-size:20px;">{safe_shop}</h2>
+    <p style="margin:0 0 20px;color:#6D7175;">Current AI visibility score</p>
+    <div style="font-size:38px;font-weight:800;color:{score_color};margin-bottom:18px;">{int(avg_score)}/100</div>
+    <h3 style="font-size:14px;margin:0 0 8px;">Top fixes</h3>
+    <ul style="margin:0 0 18px;padding-left:20px;color:#202223;">{issue_rows}</ul>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:10px;">
+      <thead><tr>
+        <th style="text-align:left;padding:8px;background:#F6F6F7;color:#6D7175;font-size:11px;text-transform:uppercase;">Product</th>
+        <th style="text-align:left;padding:8px;background:#F6F6F7;color:#6D7175;font-size:11px;text-transform:uppercase;">Score</th>
+        <th style="text-align:left;padding:8px;background:#F6F6F7;color:#6D7175;font-size:11px;text-transform:uppercase;">Missing</th>
+      </tr></thead>
+      <tbody>{product_rows}</tbody>
+    </table>
+    <div style="text-align:center;margin-top:24px;">
+      <a href="{report_url}" style="display:inline-block;background:#008060;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;">Open full report</a>
+    </div>
+    <p style="font-size:12px;color:#8C9196;text-align:center;margin-top:18px;">You requested this report from AiReady.</p>
+  </div>
+</div>"""
+
+    response = requests.post(
+        'https://api.resend.com/emails',
+        headers={'Authorization': f'Bearer {RESEND_API_KEY}', 'Content-Type': 'application/json'},
+        json={
+            'from': REPORT_FROM_EMAIL,
+            'to': [email],
+            'subject': f'AiReady report: {shop} scored {int(avg_score)}/100',
+            'html': html_body,
+        },
+        timeout=12
+    )
+    return response.status_code < 400
 
 init_db()
 
@@ -374,6 +446,26 @@ HTML_TEMPLATE = """
     .email-input { border: 1px solid #444; background: #2A2A2A; color: #fff; padding: 9px 14px; border-radius: 6px; font-size: 14px; width: 260px; outline: none; }
     .email-input::placeholder { color: #666; }
 
+    /* CONVERSION HELPERS */
+    .opportunity-card { background: #fff; border: 1px solid var(--green-border); border-radius: var(--radius); margin-bottom: 16px; box-shadow: var(--shadow); overflow: hidden; }
+    .opportunity-head { background: var(--green-bg); padding: 14px 18px; border-bottom: 1px solid var(--green-border); display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; }
+    .opportunity-title { font-size: 14px; font-weight: 700; color: #005E45; }
+    .opportunity-sub { font-size: 13px; color: var(--text-sub); margin-top: 2px; }
+    .opportunity-body { padding: 16px 18px; display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+    .opportunity-stat { border:1px solid var(--border); border-radius:8px; padding:12px; background:#FAFAFA; }
+    .opportunity-num { font-size:20px; font-weight:700; color:var(--text); line-height:1; margin-bottom:4px; }
+    .opportunity-label { font-size:12px; color:var(--text-sub); line-height:1.4; }
+    .preview-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; box-shadow: var(--shadow); overflow:hidden; }
+    .preview-head { padding:16px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; gap:12px; align-items:center; flex-wrap:wrap; }
+    .preview-title { font-size:14px; font-weight:600; color:var(--text); }
+    .preview-sub { font-size:13px; color:var(--text-sub); margin-top:2px; }
+    .preview-body { padding:16px 20px; display:none; }
+    .preview-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .preview-box { border:1px solid var(--border); border-radius:8px; background:#FAFAFA; overflow:hidden; }
+    .preview-box-title { padding:8px 10px; background:#fff; border-bottom:1px solid var(--border); font-size:12px; font-weight:600; color:var(--text-sub); text-transform:uppercase; }
+    .preview-copy { padding:12px; font-size:13px; color:var(--text); line-height:1.6; max-height:220px; overflow:auto; white-space:pre-wrap; }
+    .preview-gain { margin-top:12px; background:var(--green-bg); border:1px solid var(--green-border); border-radius:8px; padding:12px; font-size:13px; color:#005E45; }
+
     /* USAGE BADGE */
     .usage-badge { display:inline-flex; align-items:center; gap:6px; background:var(--yellow-bg); border:1px solid var(--yellow-border); color:var(--yellow); border-radius:20px; padding:4px 12px; font-size:12px; font-weight:600; }
     .usage-badge.paid { background:var(--green-bg); border-color:var(--green-border); color:var(--green); }
@@ -417,6 +509,8 @@ HTML_TEMPLATE = """
       .metrics { grid-template-columns: 1fr; }
       .issue-name { min-width: 120px; }
       .page { padding: 16px 16px 40px; }
+      .opportunity-body { grid-template-columns: 1fr; }
+      .preview-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -682,6 +776,17 @@ function jsArg(value) {
   return escapeHtml(JSON.stringify(value == null ? '' : value));
 }
 
+function estimateManualMinutes(products) {
+  const issueCount = (products || []).reduce((sum, p) => sum + ((p.missing || []).length), 0);
+  return Math.max(10, Math.round(issueCount * 4));
+}
+
+function findPreviewProduct(products) {
+  const candidates = (products || []).filter(p => (p.missing || []).length > 0);
+  if (!candidates.length) return (products || [])[0] || null;
+  return candidates.sort((a, b) => a.score - b.score)[0];
+}
+
 function toggleFix(el) {
   el.classList.toggle('expanded');
 }
@@ -735,6 +840,46 @@ window.renderResults = function renderResults(data) {
       <div class="metric-label">Total missing fields</div>
     </div>
   </div>`;
+
+  const manualMinutes = estimateManualMinutes(data.products);
+  const lowScoreProducts = data.products.filter(p => p.score < 50).length;
+  const previewProduct = findPreviewProduct(data.products);
+  html += `<div class="opportunity-card">
+    <div class="opportunity-head">
+      <div>
+        <div class="opportunity-title">What this scan means for your store</div>
+        <div class="opportunity-sub">Turn the score into concrete fixes merchants can understand.</div>
+      </div>
+      <button class="btn-primary" onclick="previewFirstFix(this)">Preview 1 AI Fix</button>
+    </div>
+    <div class="opportunity-body">
+      <div class="opportunity-stat">
+        <div class="opportunity-num">${lowScoreProducts}</div>
+        <div class="opportunity-label">products need urgent AI visibility work</div>
+      </div>
+      <div class="opportunity-stat">
+        <div class="opportunity-num">~${manualMinutes} min</div>
+        <div class="opportunity-label">estimated manual cleanup time</div>
+      </div>
+      <div class="opportunity-stat">
+        <div class="opportunity-num">${s.top_issues.length ? escapeHtml(s.top_issues[0].field) : 'Schema'}</div>
+        <div class="opportunity-label">highest priority issue to fix first</div>
+      </div>
+    </div>
+  </div>`;
+
+  if (previewProduct) {
+    html += `<div class="preview-card" id="fixPreviewCard">
+      <div class="preview-head">
+        <div>
+          <div class="preview-title">Free AI repair preview</div>
+          <div class="preview-sub">See one product before and after before upgrading.</div>
+        </div>
+        <button class="btn-secondary" onclick="previewFirstFix(this)">Generate Preview</button>
+      </div>
+      <div class="preview-body" id="fixPreviewBody"></div>
+    </div>`;
+  }
 
   // Top issues card
   if (s.top_issues.length) {
@@ -844,13 +989,13 @@ window.renderResults = function renderResults(data) {
   // Email capture
   const shopDomain = s.store || '';
   html += `<div class="email-card">
-    <h3>Get your weekly AI Readiness Report</h3>
-    <p>We scan your store every week and email you the score + what to fix.</p>
+    <h3>Email this report to yourself</h3>
+    <p>Get the current scan summary now, then receive weekly score changes.</p>
     <div class="email-row">
       <input type="email" id="subEmail" class="email-input" placeholder="your@email.com" />
-      <button class="btn-primary" onclick="subscribe(${jsArg(shopDomain)})">Get Weekly Report</button>
+      <button class="btn-primary" onclick="subscribe(${jsArg(shopDomain)})">Send Report</button>
     </div>
-    <div id="subMsg" style="margin-top:10px;font-size:13px;color:#95BF47;display:none;">Subscribed! You'll get your first report within a week.</div>
+    <div id="subMsg" style="margin-top:10px;font-size:13px;color:#95BF47;display:none;"></div>
   </div>`;
 
   results.innerHTML = html;
@@ -984,6 +1129,77 @@ window.generateDesc = async function generateDesc(btn, name, brand, description,
   btn.textContent = 'Generate AI Description';
 }
 
+window.previewFirstFix = async function previewFirstFix(btn) {
+  if (!lastData || !lastData.products || !lastData.products.length) {
+    alert('Please scan a store first.');
+    return;
+  }
+  const product = findPreviewProduct(lastData.products);
+  if (!product) return;
+  const body = document.getElementById('fixPreviewBody');
+  if (!body) return;
+  const shop = lastData.summary ? lastData.summary.store : '';
+  const oldText = product.description || 'No useful product description was found on this product.';
+  const missing = (product.missing || []).map(f => f.label || f).filter(Boolean);
+  const oldScore = product.score || 0;
+  const estimatedScore = Math.min(96, oldScore + missing.slice(0, 4).reduce((sum, label) => {
+    const hit = (product.missing || []).find(f => (f.label || f) === label);
+    return sum + (hit && hit.weight ? hit.weight : 6);
+  }, 0));
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+  }
+  body.style.display = 'block';
+  body.innerHTML = '<span class="spinner"></span> Creating a before/after preview...';
+
+  try {
+    const res = await fetch('/generate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        name: product.name || '',
+        brand: product.brand || '',
+        description: product.description || '',
+        missing,
+        shop
+      })
+    });
+    const data = await res.json();
+    if (data.error === 'LIMIT_REACHED') {
+      body.style.display = 'none';
+      showUpgradeModal(shop);
+      return;
+    }
+    if (data.error) {
+      body.innerHTML = `<div class="error-banner">${escapeHtml(data.error)}</div>`;
+      return;
+    }
+    body.innerHTML = `<div class="preview-grid">
+      <div class="preview-box">
+        <div class="preview-box-title">Before - ${escapeHtml(product.name || 'Product')}</div>
+        <div class="preview-copy">${escapeHtml(oldText)}</div>
+      </div>
+      <div class="preview-box">
+        <div class="preview-box-title">After - AI optimized</div>
+        <div class="preview-copy">${escapeHtml(data.description || '')}</div>
+      </div>
+    </div>
+    <div class="preview-gain">
+      Estimated score lift: <strong>${oldScore}/100 -> ${estimatedScore}/100</strong>.
+      Fixes targeted: ${missing.slice(0, 4).map(escapeHtml).join(', ') || 'description quality'}.
+    </div>`;
+  } catch(e) {
+    body.innerHTML = '<div class="error-banner">Could not generate the preview. Please try again.</div>';
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Generate Preview';
+    }
+  }
+}
+
 async function saveToShopify(btn, productId, shop, description) {
   if (!productId || !shop) { alert('Store not connected. Install the app via Shopify to enable saving.'); return; }
   btn.disabled = true;
@@ -1110,15 +1326,28 @@ async function subscribe(shop) {
   const email = document.getElementById('subEmail').value.trim();
   if (!email) { alert('Please enter your email.'); return; }
   if (!shop) { alert('Please scan a store first.'); return; }
+  const msg = document.getElementById('subMsg');
+  const payload = {email, shop};
+  if (lastData && lastData.summary) {
+    payload.summary = lastData.summary;
+    payload.products = (lastData.products || []).slice(0, 10).map(p => ({
+      name: p.name,
+      score: p.score,
+      missing: (p.missing || []).map(f => f.label || f).slice(0, 5)
+    }));
+  }
   try {
     const res = await fetch('/subscribe', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({email, shop})
+      body: JSON.stringify(payload)
     });
     const data = await res.json();
     if (data.success) {
-      document.getElementById('subMsg').style.display = 'block';
+      msg.style.display = 'block';
+      msg.textContent = data.sent
+        ? 'Report sent. Weekly score tracking is now enabled.'
+        : 'Saved. Weekly score tracking is now enabled.';
       document.getElementById('subEmail').value = '';
     } else {
       alert(data.error || 'Subscription failed.');
@@ -2879,13 +3108,18 @@ def subscribe():
     data = request.get_json()
     email = data.get('email', '').strip().lower()
     shop = data.get('shop', '').strip().lower()
+    summary = data.get('summary') if isinstance(data.get('summary'), dict) else {}
+    products = data.get('products') if isinstance(data.get('products'), list) else []
     if not email or not shop:
         return jsonify({'error': 'Email and shop required.'}), 400
+    if not is_valid_email(email):
+        return jsonify({'error': 'Please enter a valid email.'}), 400
     try:
         db_execute('''INSERT INTO subscriptions (email, shop) VALUES (?, ?)
             ON CONFLICT(email, shop) DO NOTHING
         ''', (email, shop))
-        return jsonify({'success': True})
+        sent = send_scan_report_email(email, shop, summary, products)
+        return jsonify({'success': True, 'sent': sent})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -2903,12 +3137,16 @@ def run_weekly_scan():
     for sub_id, email, shop, last_score in subs:
         try:
             # Scan the store
-            urls = get_product_urls(shop)
+            urls, shopify_products = get_product_urls(shop)
             if not urls:
                 continue
+            product_by_handle = {p.get('handle', ''): p for p in shopify_products if p.get('handle')}
             results = []
             for url in urls[:10]:
-                schema = extract_schema(url)
+                handle = url.rstrip('/').split('/products/')[-1].split('?')[0]
+                schema = schema_from_shopify_product(product_by_handle[handle]) if handle in product_by_handle else None
+                if not schema:
+                    schema = extract_schema(url)
                 if not schema:
                     continue
                 score, present, missing = score_product(schema)
@@ -2963,7 +3201,7 @@ def run_weekly_scan():
                     'https://api.resend.com/emails',
                     headers={'Authorization': f'Bearer {RESEND_API_KEY}', 'Content-Type': 'application/json'},
                     json={
-                        'from': 'AiReady <onboarding@resend.dev>',
+                        'from': REPORT_FROM_EMAIL,
                         'to': [email],
                         'subject': f'Weekly AI Readiness Report: {shop} scored {avg}/100',
                         'html': html_body,
