@@ -669,7 +669,7 @@ window.renderResults = function renderResults(data) {
   // Priority fixes
   const weightMap = {};
   for (const p of data.products) {
-    for (const f of p.missing) {
+    for (const f of (p.missing || [])) {
       if (!weightMap[f.label] || weightMap[f.label].weight < f.weight) weightMap[f.label] = f;
     }
   }
@@ -767,7 +767,7 @@ window.renderResults = function renderResults(data) {
     const missing = p.missing || [];
     const passCount = present.length;
     const failCount = missing.length;
-    const sanitize = s => (s||'').replace(/\n|\r/g,' ').replace(/&[a-z]+;/g,'').slice(0,200);
+    const sanitize = s => (s||'').replace(/\\n|\\r/g,' ').replace(/&[a-z]+;/g,'').slice(0,200);
     const en = sanitize(p.name).slice(0,60);
     const eb = sanitize(p.brand).slice(0,40);
     const ed = sanitize(p.description || '');
@@ -1203,69 +1203,13 @@ function downloadPDF() {
   doc.save('aiready-report-' + s.store + '-' + date.split('/').join('-') + '.pdf');
 }
 
-function initPaywallApp() {
-  var params = new URLSearchParams(window.location.search);
-  var shop = params.get('shop');
-  var storeInput = document.getElementById('storeUrl');
-  var path = window.location.pathname;
-  var isPaywall = path === '/upgrade' || params.get('upgrade') === '1';
-  if (params.get('paypal') === 'return') {
-    showUpgradeModal(shop || (storeInput && storeInput.value.trim()) || '');
-    showPaidStep();
-    return;
-  }
-  if (params.get('unlocked') === '1') {
-    shop = shop || '';
-    var banner = document.getElementById('unlimitedBanner');
-    if (banner) {
-      banner.style.display = 'block';
-      banner.innerHTML = '&#10003; <strong>Unlimited plan active</strong> &mdash; unlimited AI fixes for ' + (shop ? escapeHtml(shop) : 'your store');
-    }
-    if (shop && storeInput) {
-      storeInput.value = shop;
-      var storeEl = document.getElementById('upgradeStoreUrl');
-      if (storeEl) storeEl.value = shop;
-      document.getElementById('paypalShop').value = shop;
-    }
-    closeUpgradeModal();
-    if (shop && !document.getElementById('results').innerHTML) runScan();
-    return;
-  }
-  if (isPaywall) {
-    showUpgradeModal(shop || (storeInput && storeInput.value.trim()) || '');
-  }
-}
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initPaywallApp);
-} else {
-  initPaywallApp();
-}
-</script>
-
-<script>
-/* Scan runner — must load after renderResults (main script above) */
 function scanEsc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-function scanJsArg(v) {
-  return scanEsc(JSON.stringify(v == null ? '' : v));
-}
-function toggleRow(idx) {
-  var row = document.getElementById('detail-' + idx);
-  var productRows = document.querySelectorAll('.product-row');
-  if (!row || !productRows[idx]) return;
-  if (row.classList.contains('visible')) {
-    row.classList.remove('visible');
-    productRows[idx].classList.remove('expanded');
-  } else {
-    row.classList.add('visible');
-    productRows[idx].classList.add('expanded');
-  }
-}
-window.toggleRow = toggleRow;
 function renderBasicResults(data) {
   var results = document.getElementById('results');
   if (!results || !data || !data.summary) return;
+  lastData = data;
   window.lastData = data;
   var s = data.summary;
   var products = data.products || [];
@@ -1292,21 +1236,16 @@ function renderBasicResults(data) {
     p = products[i];
     var present = p.present || [];
     var missing = p.missing || [];
-    var sanitize = function(s) { return String(s || '').replace(/\n|\r/g, ' ').slice(0, 200); };
-    var en = sanitize(p.name).slice(0, 60);
-    var eb = sanitize(p.brand).slice(0, 40);
-    var ed = sanitize(p.description || '');
-    var ml = missing.map(function(f) { return (f.label || f || '').replace(/['"`]/g, ''); }).join('|');
     sc = p.score >= 70 ? 'score-high' : (p.score >= 40 ? 'score-mid' : 'score-low');
     passCount = present.length;
     failCount = missing.length;
-    html += '<tr class="product-row" onclick="toggleRow(' + i + ')"><td><div class="product-name-cell">' + scanEsc(p.name) +
+    html += '<tr class="product-row" data-idx="' + i + '"><td><div class="product-name-cell">' + scanEsc(p.name) +
       '<span class="expand-icon">&#9654;</span></div><div class="product-url-cell">' + scanEsc(p.url) + '</div></td>' +
       '<td><span class="score-pill ' + sc + '">' + p.score + '/100</span></td>' +
       '<td><span style="color:var(--green);font-size:13px;font-weight:500;">' + passCount + ' passed</span> &nbsp; ' +
       '<span style="color:var(--red);font-size:13px;">' + failCount + ' missing</span></td></tr>' +
       '<tr class="detail-row" id="detail-' + i + '"><td colspan="3" class="detail-cell"><div class="chips">';
-    var j, f, flabel;
+    var j, flabel;
     for (j = 0; j < present.length; j++) {
       flabel = typeof present[j] === 'string' ? present[j] : (present[j].label || '');
       html += '<span class="chip chip-ok">' + scanEsc(flabel) + '</span>';
@@ -1316,34 +1255,56 @@ function renderBasicResults(data) {
       html += '<span class="chip chip-miss">' + scanEsc(flabel) + ' - missing</span>';
     }
     html += '</div><div class="detail-actions">' +
-      '<button type="button" class="btn-secondary" onclick="event.stopPropagation();(window.analyzeContent||function(){alert(\'Loading… refresh page\');})(this,' + scanJsArg(en) + ',' + scanJsArg(eb) + ',' + scanJsArg(ed) + ')">Analyze Content</button>' +
-      '<button type="button" class="btn-primary" onclick="event.stopPropagation();(window.generateDesc||function(){alert(\'Loading… refresh page\');})(this,' + scanJsArg(en) + ',' + scanJsArg(eb) + ',' + scanJsArg(ed) + ',' + scanJsArg(ml) + ')">Generate AI Description</button>' +
+      '<button type="button" class="btn-secondary btn-analyze" data-idx="' + i + '">Analyze Content</button>' +
+      '<button type="button" class="btn-primary btn-generate" data-idx="' + i + '">Generate AI Description</button>' +
       '</div><div class="analyze-result" style="display:none;margin-top:12px;"></div>' +
       '<div class="generate-result" style="display:none;margin-top:12px;"></div></td></tr>';
   }
   html += '</tbody></table></div>';
   results.innerHTML = html;
+  results.querySelectorAll('.product-row').forEach(function(row) {
+    row.style.cursor = 'pointer';
+    row.addEventListener('click', function(e) {
+      if (e.target.closest('button')) return;
+      toggleRow(parseInt(row.getAttribute('data-idx'), 10));
+    });
+  });
+  results.querySelectorAll('.btn-analyze').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var idx = parseInt(btn.getAttribute('data-idx'), 10);
+      var prod = products[idx];
+      if (!prod || !window.analyzeContent) return;
+      var nm = String(prod.name || '').slice(0, 60);
+      var br = String(prod.brand || '').slice(0, 40);
+      var desc = String(prod.description || '').slice(0, 200);
+      window.analyzeContent(btn, nm, br, desc);
+    });
+  });
+  results.querySelectorAll('.btn-generate').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var idx = parseInt(btn.getAttribute('data-idx'), 10);
+      var prod = products[idx];
+      if (!prod || !window.generateDesc) return;
+      var nm = String(prod.name || '').slice(0, 60);
+      var br = String(prod.brand || '').slice(0, 40);
+      var desc = String(prod.description || '').slice(0, 200);
+      var ml = (prod.missing || []).map(function(f) { return f.label || f || ''; }).join('|');
+      window.generateDesc(btn, nm, br, desc, ml);
+    });
+  });
 }
 function showScanResults(data) {
-  if (typeof window.renderResults === 'function') {
-    try {
+  try {
+    if (typeof window.renderResults === 'function') {
       window.renderResults(data);
       return;
-    } catch (err) {
-      console.error('renderResults error', err);
     }
+  } catch (err) {
+    console.error('renderResults error', err);
   }
   renderBasicResults(data);
-  var tries = 0;
-  var iv = setInterval(function() {
-    tries++;
-    if (typeof window.renderResults === 'function') {
-      clearInterval(iv);
-      try { window.renderResults(data); } catch (e) { /* keep basic view */ }
-    } else if (tries > 30) {
-      clearInterval(iv);
-    }
-  }, 100);
 }
 async function runScan() {
   var input = document.getElementById('storeUrl');
@@ -1360,7 +1321,7 @@ async function runScan() {
   if (!btn || !results) return;
   btn.disabled = true;
   btn.textContent = 'Scanning...';
-  results.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Scanning up to 20 products — this may take 20–30 seconds...</p></div>';
+  results.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Scanning up to 20 products - this may take 20-30 seconds...</p></div>';
   try {
     var ctrl = new AbortController();
     var timer = setTimeout(function() { ctrl.abort(); }, 90000);
@@ -1401,24 +1362,60 @@ function initScanApp() {
   } else if (urlParam && storeInput) {
     storeInput.value = urlParam;
   }
-}
-function maybeAutoScan() {
-  var params = new URLSearchParams(window.location.search);
-  var urlParam = params.get('url');
+  var scanForm = document.getElementById('scanForm');
+  if (scanForm && !scanForm._bound) {
+    scanForm._bound = true;
+    scanForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      runScan();
+    });
+  }
   var path = window.location.pathname;
   if (path === '/upgrade' || params.get('upgrade') === '1') return;
   if (params.get('paypal') === 'return' || params.get('unlocked') === '1') return;
   if (urlParam) runScan();
 }
-var scanForm = document.getElementById('scanForm');
-if (scanForm) {
-  scanForm.addEventListener('submit', function(e) {
-    e.preventDefault();
-    runScan();
-  });
+function initPaywallApp() {
+  var params = new URLSearchParams(window.location.search);
+  var shop = params.get('shop');
+  var storeInput = document.getElementById('storeUrl');
+  var path = window.location.pathname;
+  var isPaywall = path === '/upgrade' || params.get('upgrade') === '1';
+  if (params.get('paypal') === 'return') {
+    showUpgradeModal(shop || (storeInput && storeInput.value.trim()) || '');
+    showPaidStep();
+    return;
+  }
+  if (params.get('unlocked') === '1') {
+    shop = shop || '';
+    var banner = document.getElementById('unlimitedBanner');
+    if (banner) {
+      banner.style.display = 'block';
+      banner.innerHTML = '&#10003; <strong>Unlimited plan active</strong> &mdash; unlimited AI fixes for ' + (shop ? escapeHtml(shop) : 'your store');
+    }
+    if (shop && storeInput) {
+      storeInput.value = shop;
+      var storeEl = document.getElementById('upgradeStoreUrl');
+      if (storeEl) storeEl.value = shop;
+      document.getElementById('paypalShop').value = shop;
+    }
+    closeUpgradeModal();
+    if (shop && !document.getElementById('results').innerHTML) runScan();
+    return;
+  }
+  if (isPaywall) {
+    showUpgradeModal(shop || (storeInput && storeInput.value.trim()) || '');
+  }
 }
-initScanApp();
-window.addEventListener('load', maybeAutoScan);
+function bootApp() {
+  initScanApp();
+  initPaywallApp();
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootApp);
+} else {
+  bootApp();
+}
 </script>
 
 </body>
