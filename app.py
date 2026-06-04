@@ -2946,7 +2946,7 @@ def run_weekly_scan():
                     'https://api.resend.com/emails',
                     headers={'Authorization': f'Bearer {RESEND_API_KEY}', 'Content-Type': 'application/json'},
                     json={
-                        'from': 'AiReady <reports@aiready.io>',
+                        'from': 'AiReady <onboarding@resend.dev>',
                         'to': [email],
                         'subject': f'Weekly AI Readiness Report: {shop} scored {avg}/100',
                         'html': html_body,
