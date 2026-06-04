@@ -1151,8 +1151,13 @@ document.getElementById('storeUrl').addEventListener('keydown', e => {
   if (e.key === 'Enter') runScan();
 });
 window.addEventListener('load', function() {
-  var u = new URLSearchParams(window.location.search).get('url');
+  var params = new URLSearchParams(window.location.search);
+  var u = params.get('url');
   if (u) { document.getElementById('storeUrl').value = u; runScan(); }
+  if (params.get('upgrade') === '1') {
+    var shop = params.get('shop') || document.getElementById('storeUrl').value.trim() || '';
+    showUpgradeModal(shop);
+  }
 });
 </script>
 
@@ -1863,7 +1868,7 @@ LANDING_TEMPLATE = """
         <li class="en">Bulk fix all products</li><li class="zh">批量修复全部产品</li>
         <li class="en">Weekly email reports</li><li class="zh">每周报告邮件</li>
       </ul>
-      <a href="/app" class="btn-price btn-price-paid">
+      <a href="/app?upgrade=1" class="btn-price btn-price-paid">
         <span class="en">Get Unlimited &rarr;</span>
         <span class="zh">升级无限版 &rarr;</span>
       </a>
