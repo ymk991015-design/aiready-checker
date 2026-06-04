@@ -2042,6 +2042,10 @@ LANDING_TEMPLATE = """
   <div class="nav-logo" style="font-size:15px;">Ai<span style="color:#95BF47;">Ready</span></div>
   <div class="en">AI Readiness Checker for Shopify &mdash; &copy; 2025 AiReady</div>
   <div class="zh">Shopify AI 可见性检测工具 &mdash; &copy; 2025 AiReady</div>
+  <div style="display:flex;gap:16px;">
+    <a href="/privacy" style="font-size:12px;color:#aaa;text-decoration:none;">Privacy Policy</a>
+    <a href="/terms" style="font-size:12px;color:#aaa;text-decoration:none;">Terms of Service</a>
+  </div>
 </footer>
 
 <script>
@@ -2064,6 +2068,160 @@ function toggleFaq(el) {
 </html>
 """
 
+
+PRIVACY_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Privacy Policy - AiReady</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 800px; margin: 0 auto; padding: 40px 24px 80px; color: #202223; line-height: 1.7; font-size: 15px; }
+    h1 { font-size: 28px; font-weight: 800; margin-bottom: 8px; }
+    h2 { font-size: 18px; font-weight: 700; margin-top: 36px; margin-bottom: 8px; }
+    p, li { color: #444; }
+    ul { padding-left: 20px; }
+    .nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 40px; }
+    .logo { font-size: 18px; font-weight: 800; text-decoration: none; color: #1A1A1A; }
+    .logo span { color: #95BF47; }
+    .date { font-size: 13px; color: #888; margin-bottom: 32px; }
+    a { color: #008060; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/" class="logo">Ai<span>Ready</span></a>
+    <a href="/" style="font-size:13px;color:#666;text-decoration:none;">&larr; Home</a>
+  </div>
+  <h1>Privacy Policy</h1>
+  <p class="date">Last updated: June 2025</p>
+
+  <p>AiReady ("we", "us", "our") operates the website aiready-checker.onrender.com. This page informs you of our policies regarding the collection, use, and disclosure of personal data when you use our service.</p>
+
+  <h2>1. Information We Collect</h2>
+  <p>We collect the following types of information:</p>
+  <ul>
+    <li><strong>Store URL:</strong> The Shopify store domain you enter for scanning. This is used solely to perform the AI readiness scan.</li>
+    <li><strong>Email address:</strong> Only if you subscribe to weekly reports or submit an upgrade request. Used to send you reports and unlock confirmation.</li>
+    <li><strong>Usage data:</strong> We track how many AI actions (description generation, saves) you have used per store domain to enforce the free usage limit.</li>
+    <li><strong>Shopify OAuth token:</strong> If you connect your store via Shopify OAuth, we store an access token to enable saving fixes directly to your products. This token is stored securely and only used for actions you explicitly trigger.</li>
+  </ul>
+
+  <h2>2. How We Use Your Information</h2>
+  <ul>
+    <li>To perform AI readiness scans of your Shopify store</li>
+    <li>To generate AI-optimized product descriptions</li>
+    <li>To send weekly AI readiness reports (only if subscribed)</li>
+    <li>To unlock unlimited access after payment verification</li>
+    <li>To save product description updates to your Shopify store (only with your explicit action)</li>
+  </ul>
+
+  <h2>3. Data Sharing</h2>
+  <p>We do not sell, trade, or rent your personal data to third parties. We use the following third-party services:</p>
+  <ul>
+    <li><strong>DeepSeek AI:</strong> Product descriptions are generated using DeepSeek's API. Product name and description text is sent to DeepSeek for generation. No personal data is included.</li>
+    <li><strong>Resend:</strong> Used to send weekly email reports to subscribers.</li>
+    <li><strong>Render:</strong> Our hosting provider. Your data is stored on Render's infrastructure.</li>
+    <li><strong>Shopify:</strong> If you connect your store via OAuth, we interact with Shopify's Admin API on your behalf.</li>
+  </ul>
+
+  <h2>4. Data Retention</h2>
+  <p>We retain your data for as long as your account is active or as needed to provide services. You may request deletion of your data at any time by contacting us.</p>
+
+  <h2>5. Security</h2>
+  <p>We take reasonable measures to protect your information. Shopify access tokens are stored securely and never exposed publicly. However, no method of transmission over the internet is 100% secure.</p>
+
+  <h2>6. Your Rights</h2>
+  <p>You have the right to access, correct, or delete your personal data. To exercise these rights, contact us at the email below.</p>
+
+  <h2>7. Cookies</h2>
+  <p>We use session cookies only for Shopify OAuth authentication flow. We do not use tracking or advertising cookies.</p>
+
+  <h2>8. Changes to This Policy</h2>
+  <p>We may update this policy from time to time. We will notify you of any changes by updating the date at the top of this page.</p>
+
+  <h2>9. Contact</h2>
+  <p>If you have questions about this Privacy Policy, please contact us at: <a href="mailto:ymk991015@gmail.com">ymk991015@gmail.com</a></p>
+</body>
+</html>
+"""
+
+TERMS_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Terms of Service - AiReady</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 800px; margin: 0 auto; padding: 40px 24px 80px; color: #202223; line-height: 1.7; font-size: 15px; }
+    h1 { font-size: 28px; font-weight: 800; margin-bottom: 8px; }
+    h2 { font-size: 18px; font-weight: 700; margin-top: 36px; margin-bottom: 8px; }
+    p, li { color: #444; }
+    ul { padding-left: 20px; }
+    .nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 40px; }
+    .logo { font-size: 18px; font-weight: 800; text-decoration: none; color: #1A1A1A; }
+    .logo span { color: #95BF47; }
+    .date { font-size: 13px; color: #888; margin-bottom: 32px; }
+    a { color: #008060; }
+  </style>
+</head>
+<body>
+  <div class="nav">
+    <a href="/" class="logo">Ai<span>Ready</span></a>
+    <a href="/" style="font-size:13px;color:#666;text-decoration:none;">&larr; Home</a>
+  </div>
+  <h1>Terms of Service</h1>
+  <p class="date">Last updated: June 2025</p>
+
+  <p>Please read these Terms of Service ("Terms") carefully before using AiReady at aiready-checker.onrender.com ("Service"). By accessing or using the Service, you agree to be bound by these Terms.</p>
+
+  <h2>1. Use of Service</h2>
+  <p>AiReady provides a tool to scan Shopify stores for AI search visibility and generate optimized product descriptions. You may use the Service only for lawful purposes and in accordance with these Terms.</p>
+  <p>You agree not to:</p>
+  <ul>
+    <li>Use the Service to scan stores you do not own or have permission to scan</li>
+    <li>Attempt to reverse engineer or circumvent usage limits</li>
+    <li>Use automated tools to make excessive requests to the Service</li>
+    <li>Use the Service for any illegal or unauthorized purpose</li>
+  </ul>
+
+  <h2>2. Free Tier and Paid Access</h2>
+  <p>The Service offers a free tier with limited usage (5 AI actions per store). After exhausting free actions, a one-time payment of $9 USD is required to unlock unlimited access for that store. Payments are non-refundable once the unlimited access has been activated.</p>
+
+  <h2>3. Shopify Integration</h2>
+  <p>If you connect your Shopify store via OAuth, you grant AiReady permission to read and update product information on your behalf. You may revoke this permission at any time through your Shopify admin panel. AiReady will only make changes to your store when you explicitly trigger an action.</p>
+
+  <h2>4. Intellectual Property</h2>
+  <p>The AI-generated product descriptions produced by the Service are provided for your use. You are responsible for reviewing and editing generated content before publishing it to your store. AiReady does not claim ownership of content generated on your behalf.</p>
+
+  <h2>5. Disclaimer of Warranties</h2>
+  <p>The Service is provided "as is" without warranties of any kind. We do not guarantee that the Service will be uninterrupted, error-free, or that the results will meet your specific requirements. AI-generated content may require editing before use.</p>
+
+  <h2>6. Limitation of Liability</h2>
+  <p>To the maximum extent permitted by law, AiReady shall not be liable for any indirect, incidental, special, or consequential damages resulting from your use of the Service, including but not limited to loss of profits, data, or business opportunities.</p>
+
+  <h2>7. Changes to Terms</h2>
+  <p>We reserve the right to modify these Terms at any time. Continued use of the Service after changes constitutes acceptance of the new Terms.</p>
+
+  <h2>8. Governing Law</h2>
+  <p>These Terms shall be governed by applicable law. Any disputes shall be resolved through good-faith negotiation.</p>
+
+  <h2>9. Contact</h2>
+  <p>For questions about these Terms, contact us at: <a href="mailto:ymk991015@gmail.com">ymk991015@gmail.com</a></p>
+</body>
+</html>
+"""
+
+
+@app.route('/privacy')
+def privacy():
+    return render_template_string(PRIVACY_TEMPLATE)
+
+@app.route('/terms')
+def terms():
+    return render_template_string(TERMS_TEMPLATE)
 
 @app.route('/')
 def index():
