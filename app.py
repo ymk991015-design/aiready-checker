@@ -432,6 +432,9 @@ HTML_TEMPLATE = """
     .pay-copy-btn:hover { background:#F1F8F5; border-color:var(--green-border); }
     .pay-done-btn { width:100%; padding:12px; font-size:14px; background:#fff; border:1px solid var(--border-strong); border-radius:6px; cursor:pointer; color:var(--text); margin-top:4px; }
     .pay-done-btn:hover { background:var(--green-bg); border-color:var(--green); color:#005E45; }
+    body.paywall-open { overflow: hidden; }
+    body.paywall-open .page { filter: blur(2px); pointer-events: none; user-select: none; }
+    body.paywall-open .topbar { filter: blur(2px); pointer-events: none; }
 
     @media(max-width: 640px) {
       .metrics { grid-template-columns: 1fr; }
@@ -440,7 +443,7 @@ HTML_TEMPLATE = """
     }
   </style>
 </head>
-<body>
+<body{% if open_upgrade %} class="paywall-open"{% endif %}>
 
 <div class="topbar">
   <a href="/" style="text-decoration:none;"><div class="topbar-logo">Ai<span>Ready</span></div></a>
@@ -450,7 +453,7 @@ HTML_TEMPLATE = """
 <div class="page">
 
   <div class="page-header">
-    <div class="page-title">AI Readiness Scanner</div>
+    <div class="page-title">{% if open_upgrade %}Upgrade to Unlimited{% else %}AI Readiness Scanner{% endif %}</div>
     <div class="page-subtitle">Check how visible your Shopify products are to AI engines like ChatGPT, Perplexity, and Gemini.</div>
   </div>
 
@@ -979,8 +982,12 @@ function copyPayId(id) {
   }).catch(function() { prompt('Copy:', el.textContent.trim()); });
 }
 function showUpgradeModal(shop) {
-  document.getElementById('paypalShop').value = shop || '';
-  var fromPricing = new URLSearchParams(window.location.search).get('upgrade') === '1';
+  var modal = document.getElementById('upgradeModal');
+  if (!modal) return;
+  var shopInput = document.getElementById('paypalShop');
+  if (shopInput) shopInput.value = shop || '';
+  var fromPricing = new URLSearchParams(window.location.search).get('upgrade') === '1'
+    || window.location.pathname === '/upgrade';
   var title = document.querySelector('#upgradeModal .modal-title');
   var sub = document.querySelector('#upgradeModal .modal-sub');
   if (title && sub) {
@@ -994,10 +1001,16 @@ function showUpgradeModal(shop) {
   }
   document.getElementById('modalStep1').style.display = 'block';
   document.getElementById('modalStep2').style.display = 'none';
-  document.getElementById('upgradeModal').classList.add('visible');
+  modal.classList.add('visible');
+  document.body.classList.add('paywall-open');
 }
 function closeUpgradeModal() {
-  document.getElementById('upgradeModal').classList.remove('visible');
+  var modal = document.getElementById('upgradeModal');
+  if (modal) modal.classList.remove('visible');
+  document.body.classList.remove('paywall-open');
+  if (window.location.pathname === '/upgrade' || new URLSearchParams(window.location.search).get('upgrade') === '1') {
+    window.location.href = '/app';
+  }
 }
 function showPaidStep() {
   setTimeout(() => {
@@ -1165,8 +1178,10 @@ document.getElementById('storeUrl').addEventListener('keydown', e => {
 window.addEventListener('load', function() {
   var params = new URLSearchParams(window.location.search);
   var u = params.get('url');
-  if (u) { document.getElementById('storeUrl').value = u; runScan(); }
-  if (params.get('upgrade') === '1') {
+  var isPaywall = params.get('upgrade') === '1' || window.location.pathname === '/upgrade';
+  if (u && !isPaywall) { document.getElementById('storeUrl').value = u; runScan(); }
+  else if (u) { document.getElementById('storeUrl').value = u; }
+  if (isPaywall) {
     var shop = params.get('shop') || document.getElementById('storeUrl').value.trim() || '';
     showUpgradeModal(shop);
   }
@@ -1174,11 +1189,11 @@ window.addEventListener('load', function() {
 </script>
 
 <!-- UPGRADE MODAL -->
-<div class="modal-overlay" id="upgradeModal">
+<div class="modal-overlay{% if open_upgrade %} visible{% endif %}" id="upgradeModal">
   <div class="modal-box">
     <div class="modal-icon">&#128274;</div>
-    <div class="modal-title">You've used your 5 free actions</div>
-    <div class="modal-sub">Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.</div>
+    <div class="modal-title">{% if open_upgrade %}Upgrade to Unlimited{% else %}You've used your 5 free actions{% endif %}</div>
+    <div class="modal-sub">{% if open_upgrade %}One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.{% else %}Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.{% endif %}</div>
     <div class="modal-price">${{ usd_price }}<span class="modal-price-cny">&asymp; &yen;{{ cny_price }}</span></div>
     <div class="modal-rate-note">汇率 1 USD = {{ usd_cny_rate }} CNY{% if rate_date %}（{{ rate_date }}）{% endif %}</div>
     <div class="modal-price-sub">one-time payment &mdash; unlimited forever</div>
@@ -1216,7 +1231,7 @@ window.addEventListener('load', function() {
       <button class="btn-primary" style="width:100%;padding:12px;" onclick="submitUnlockRequest()">提交解锁申请 Submit</button>
       <div id="unlockMsg" style="margin-top:10px;font-size:13px;display:none;"></div>
     </div>
-    <input type="hidden" id="paypalShop" value="">
+    <input type="hidden" id="paypalShop" value="{{ shop_prefill or '' }}">
     <div class="modal-close" onclick="closeUpgradeModal()">Maybe later</div>
   </div>
 </div>
@@ -1880,7 +1895,7 @@ LANDING_TEMPLATE = """
         <li class="en">Bulk fix all products</li><li class="zh">批量修复全部产品</li>
         <li class="en">Weekly email reports</li><li class="zh">每周报告邮件</li>
       </ul>
-      <a href="/app?upgrade=1" class="btn-price btn-price-paid">
+      <a href="/upgrade" class="btn-price btn-price-paid">
         <span class="en">Get Unlimited &rarr;</span>
         <span class="zh">升级无限版 &rarr;</span>
       </a>
@@ -1987,13 +2002,13 @@ function toggleFaq(el) {
 def index():
     return render_template_string(LANDING_TEMPLATE)
 
-@app.route('/app')
-def app_page():
-    url_param = request.args.get('url', '')
+def _render_app_page(open_upgrade=False, shop_prefill='', url_param=''):
     cny_price, usd_cny_rate, rate_date = get_usd_cny_quote()
     return render_template_string(
         HTML_TEMPLATE,
         prefill_url=url_param,
+        open_upgrade=open_upgrade,
+        shop_prefill=shop_prefill,
         paypal_url=PAYPAL_URL,
         usd_price=int(USD_PRICE) if USD_PRICE == int(USD_PRICE) else USD_PRICE,
         wechat_pay_id=WECHAT_PAY_ID,
@@ -2003,6 +2018,24 @@ def app_page():
         cny_price=cny_price,
         usd_cny_rate=usd_cny_rate,
         rate_date=rate_date,
+    )
+
+
+@app.route('/upgrade')
+def upgrade_page():
+    shop = request.args.get('shop', '').strip().lower()
+    return _render_app_page(open_upgrade=True, shop_prefill=shop)
+
+
+@app.route('/app')
+def app_page():
+    url_param = request.args.get('url', '')
+    open_upgrade = request.args.get('upgrade') == '1'
+    shop_prefill = request.args.get('shop', '').strip().lower()
+    return _render_app_page(
+        open_upgrade=open_upgrade,
+        shop_prefill=shop_prefill,
+        url_param=url_param,
     )
 
 @app.route('/scan', methods=['POST'])
