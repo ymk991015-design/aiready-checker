@@ -432,6 +432,11 @@ HTML_TEMPLATE = """
     .pay-copy-btn:hover { background:#F1F8F5; border-color:var(--green-border); }
     .pay-done-btn { width:100%; padding:12px; font-size:14px; background:#fff; border:1px solid var(--border-strong); border-radius:6px; cursor:pointer; color:var(--text); margin-top:4px; }
     .pay-done-btn:hover { background:var(--green-bg); border-color:var(--green); color:#005E45; }
+    .pay-amount-row { text-align:left; margin-bottom:12px; }
+    .pay-amount-label { font-size:12px; color:var(--text-sub); margin-bottom:6px; display:block; }
+    .pay-amount-hint { font-size:11px; color:var(--text-hint); margin-top:6px; line-height:1.5; }
+    .pay-store-row { text-align:left; margin-bottom:14px; }
+    .success-banner { background:var(--green-bg); border:1px solid var(--green-border); color:#005E45; padding:14px 18px; border-radius:8px; margin-bottom:16px; font-size:14px; text-align:center; }
     body.paywall-open { overflow: hidden; }
     body.paywall-open .page { filter: blur(2px); pointer-events: none; user-select: none; }
     body.paywall-open .topbar { filter: blur(2px); pointer-events: none; }
@@ -469,6 +474,7 @@ HTML_TEMPLATE = """
     </div>
   </div>
 
+  <div id="unlimitedBanner" style="display:none;" class="success-banner"></div>
   <div id="results"></div>
 
 </div><!-- end .page -->
@@ -986,6 +992,8 @@ function showUpgradeModal(shop) {
   if (!modal) return;
   var shopInput = document.getElementById('paypalShop');
   if (shopInput) shopInput.value = shop || '';
+  var storeUrl = document.getElementById('upgradeStoreUrl');
+  if (storeUrl && shop) storeUrl.value = shop;
   var fromPricing = new URLSearchParams(window.location.search).get('upgrade') === '1'
     || window.location.pathname === '/upgrade';
   var title = document.querySelector('#upgradeModal .modal-title');
@@ -1018,26 +1026,51 @@ function showPaidStep() {
     document.getElementById('modalStep2').style.display = 'block';
   }, 1500);
 }
+function getPaywallShop() {
+  var el = document.getElementById('upgradeStoreUrl');
+  if (el && el.value.trim()) return el.value.trim();
+  var hidden = document.getElementById('paypalShop');
+  if (hidden && hidden.value.trim()) return hidden.value.trim();
+  var scan = document.getElementById('storeUrl');
+  if (scan && scan.value.trim()) return scan.value.trim();
+  return '';
+}
 async function submitUnlockRequest() {
   const email = document.getElementById('unlockEmail').value.trim();
-  const shop = document.getElementById('paypalShop').value;
+  const shop = getPaywallShop();
   const method = document.getElementById('unlockMethod').value;
+  const amountCny = document.getElementById('payAmountCny') ? document.getElementById('payAmountCny').value : '';
   const msg = document.getElementById('unlockMsg');
+  if (!shop) { alert('Please enter your store URL (e.g. yourstore.myshopify.com).'); return; }
   if (!email) { alert('Please enter your contact info (email, WeChat ID, or phone).'); return; }
+  const btn = document.querySelector('#modalStep2 .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Unlocking...'; }
   try {
     const res = await fetch('/request-unlock', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({email, shop, method})
+      body: JSON.stringify({email, shop, method, amount_cny: amountCny})
     });
     const data = await res.json();
+    if (data.success && data.redirect) {
+      window.location.href = data.redirect;
+      return;
+    }
+    if (data.error) {
+      msg.style.display = 'block';
+      msg.style.color = 'var(--red)';
+      msg.textContent = data.error;
+      if (btn) { btn.disabled = false; btn.textContent = '提交解锁申请 Submit'; }
+      return;
+    }
     msg.style.display = 'block';
     msg.style.color = 'var(--green)';
-    msg.textContent = 'Request received! Your store will be unlocked within a few hours.';
+    msg.textContent = 'Unlocked! Redirecting...';
   } catch(e) {
     msg.style.display = 'block';
     msg.style.color = 'var(--red)';
     msg.textContent = 'Error sending request. Please email us directly.';
+    if (btn) { btn.disabled = false; btn.textContent = '提交解锁申请 Submit'; }
   }
 }
 document.addEventListener('click', e => {
@@ -1185,6 +1218,22 @@ window.addEventListener('load', function() {
     var shop = params.get('shop') || document.getElementById('storeUrl').value.trim() || '';
     showUpgradeModal(shop);
   }
+  if (params.get('unlocked') === '1') {
+    var shop = params.get('shop') || '';
+    var banner = document.getElementById('unlimitedBanner');
+    if (banner) {
+      banner.style.display = 'block';
+      banner.innerHTML = '&#10003; <strong>Unlimited plan active</strong> &mdash; unlimited AI fixes for ' + (shop ? escapeHtml(shop) : 'your store');
+    }
+    if (shop) {
+      document.getElementById('storeUrl').value = shop;
+      var storeEl = document.getElementById('upgradeStoreUrl');
+      if (storeEl) storeEl.value = shop;
+      document.getElementById('paypalShop').value = shop;
+    }
+    closeUpgradeModal();
+    if (shop && !document.getElementById('results').innerHTML) runScan();
+  }
 });
 </script>
 
@@ -1194,9 +1243,13 @@ window.addEventListener('load', function() {
     <div class="modal-icon">&#128274;</div>
     <div class="modal-title">{% if open_upgrade %}Upgrade to Unlimited{% else %}You've used your 5 free actions{% endif %}</div>
     <div class="modal-sub">{% if open_upgrade %}One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.{% else %}Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.{% endif %}</div>
-    <div class="modal-price">${{ usd_price }}<span class="modal-price-cny">&asymp; &yen;{{ cny_price }}</span></div>
-    <div class="modal-rate-note">汇率 1 USD = {{ usd_cny_rate }} CNY{% if rate_date %}（{{ rate_date }}）{% endif %}</div>
+    <div class="modal-price">${{ usd_price }} <span class="modal-price-cny">参考 &asymp; &yen;{{ cny_price }}</span></div>
+    <div class="modal-rate-note">PayPal 固定 ${{ usd_price }}；微信/支付宝金额由您自定（参考汇率 1 USD = {{ usd_cny_rate }} CNY）</div>
     <div class="modal-price-sub">one-time payment &mdash; unlimited forever</div>
+    <div class="pay-store-row">
+      <label class="pay-amount-label">店铺域名 Store URL <span style="color:#D72C0D">*</span></label>
+      <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="document.getElementById('paypalShop').value=this.value" />
+    </div>
     <div class="modal-features">
       <div class="modal-feature">&#10003; &nbsp; Unlimited AI description generation</div>
       <div class="modal-feature">&#10003; &nbsp; Save directly to Shopify</div>
@@ -1204,21 +1257,28 @@ window.addEventListener('load', function() {
       <div class="modal-feature">&#10003; &nbsp; Weekly score reports via email</div>
     </div>
     <div id="modalStep1">
+      <div class="pay-amount-row">
+        <label class="pay-amount-label" for="payAmountCny">付款金额 Payment amount (CNY) &mdash; 微信/支付宝扫码时填写</label>
+        <input type="number" id="payAmountCny" class="scan-input" min="0.01" step="0.01" value="{{ cny_price }}" placeholder="自定金额" />
+        <div class="pay-amount-hint">Suggested &yen;{{ cny_price }} (ref. ${{ usd_price }}). You may enter any amount when paying via WeChat or Alipay.</div>
+      </div>
       <a class="btn-primary pay-btn" href="{{ paypal_url }}" target="_blank" rel="noopener noreferrer" onclick="handlePayPalClick(event)">Pay ${{ usd_price }} via PayPal &rarr;</a>
-      <div class="pay-divider">或扫码支付人民币 <strong>&yen;{{ cny_price }}</strong>（约 ${{ usd_price }} &times; {{ usd_cny_rate }}）</div>
+      <div class="pay-divider">或扫码支付（金额自定，按上方填写）</div>
       <div class="pay-option">
-        <div class="pay-option-title">微信支付 WeChat Pay &yen;{{ cny_price }}</div>
+        <div class="pay-option-title">微信支付 WeChat Pay</div>
         {% if wechat_qr_url %}<img src="{{ wechat_qr_url }}" alt="WeChat QR" class="pay-qr" />{% endif %}
+        <div class="pay-amount-hint">打开微信扫一扫，在付款页输入上方金额（可修改）</div>
         <div class="pay-option-id" id="wechatPayId">{{ wechat_pay_id }}</div>
         <button type="button" class="pay-copy-btn" onclick="copyPayId('wechatPayId')">复制微信号 Copy WeChat ID</button>
       </div>
       <div class="pay-option">
-        <div class="pay-option-title">支付宝 Alipay &yen;{{ cny_price }}</div>
+        <div class="pay-option-title">支付宝 Alipay</div>
         {% if alipay_qr_url %}<img src="{{ alipay_qr_url }}" alt="Alipay QR" class="pay-qr" />{% endif %}
+        <div class="pay-amount-hint">打开支付宝扫一扫，在付款页输入上方金额（可修改）</div>
         <div class="pay-option-id" id="alipayAccount">{{ alipay_account }}</div>
         <button type="button" class="pay-copy-btn" onclick="copyPayId('alipayAccount')">复制支付宝账号 Copy Alipay</button>
       </div>
-      <button type="button" class="pay-done-btn" onclick="showPaidStep()">我已付款，提交核实 I paid &rarr;</button>
+      <button type="button" class="pay-done-btn" onclick="showPaidStep()">我已付款，继续解锁 I paid &rarr;</button>
     </div>
     <div id="modalStep2" style="display:none;margin-top:16px;">
       <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">付款后请留下联系方式，方便核实并解锁店铺：</p>
@@ -2387,16 +2447,27 @@ ADMIN_SECRET = os.environ.get('ADMIN_SECRET', 'aiready-admin-2025')
 
 @app.route('/request-unlock', methods=['POST'])
 def request_unlock():
-    """User submits contact info after paying. Stored for admin review."""
-    data = request.get_json()
+    """User confirms payment; unlock store and redirect to unlimited app."""
+    data = request.get_json() or {}
     email = data.get('email', '').strip()
     method = data.get('method', 'paypal').strip().lower()
-    shop = data.get('shop', '').strip().lower()
+    amount_cny = data.get('amount_cny', '')
+    shop = normalize_shop(data.get('shop', ''))
     if not email or not shop:
         return jsonify({'error': 'Contact and shop required.'}), 400
-    note = f'[{method}] {email}'
+    if not is_valid_shop(shop):
+        return jsonify({'error': 'Invalid store URL. Use your myshopify.com domain.'}), 400
+    amount_note = f' amount=¥{amount_cny}' if amount_cny else ''
+    note = f'[{method}] {email}{amount_note}'
     db_execute('INSERT INTO unlock_requests (email, shop) VALUES (?, ?)', (note, shop))
-    return jsonify({'success': True})
+    db_execute('''INSERT INTO paid_shops (shop, paypal_txn_id, paid_at)
+        VALUES (?, ?, datetime('now'))
+        ON CONFLICT(shop) DO UPDATE SET
+            paypal_txn_id=excluded.paypal_txn_id,
+            paid_at=datetime('now')
+    ''', (shop, f'{method}-self-report'))
+    redirect_url = f'{APP_BASE_URL}/app?shop={shop}&unlocked=1'
+    return jsonify({'success': True, 'redirect': redirect_url})
 
 
 @app.route('/admin/unlock', methods=['POST'])
