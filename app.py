@@ -9,6 +9,7 @@ import hashlib
 import base64
 import sqlite3
 import tempfile
+import time
 from urllib.parse import urljoin, urlparse, urlencode, unquote_plus
 from concurrent.futures import ThreadPoolExecutor
 
@@ -19,6 +20,7 @@ RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 CRON_SECRET = os.environ.get('CRON_SECRET', 'aiready-cron-2025')
 USD_PRICE = float(os.environ.get('USD_PRICE', '9'))
 PAYPAL_HOSTED_BUTTON_ID = os.environ.get('PAYPAL_HOSTED_BUTTON_ID', 'VA8TFCR6A8NMY')
+PAYPAL_RECEIVER_EMAIL = os.environ.get('PAYPAL_RECEIVER_EMAIL', '').strip().lower()
 APP_BASE_URL = os.environ.get('APP_BASE_URL', 'https://aiready-checker.onrender.com').rstrip('/')
 DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
 DB_PATH = os.environ.get('DB_PATH', os.path.join(tempfile.gettempdir(), 'aiready.db'))
@@ -477,6 +479,11 @@ HTML_TEMPLATE = """
         <input type="hidden" name="cmd" value="_s-xclick" />
         <input type="hidden" name="hosted_button_id" value="{{ paypal_hosted_button_id }}" />
         <input type="hidden" name="currency_code" value="USD" />
+        <input type="hidden" name="custom" id="paypalCustom" value="{{ shop_prefill or '' }}" />
+        <input type="hidden" name="notify_url" value="{{ app_base_url }}/paypal/ipn" />
+        <input type="hidden" name="return" id="paypalReturn" value="{{ app_base_url }}/paypal/return?shop={{ shop_prefill or '' }}" />
+        <input type="hidden" name="cancel_return" id="paypalCancelReturn" value="{{ app_base_url }}/upgrade?shop={{ shop_prefill or '' }}" />
+        <input type="hidden" name="cbt" value="Return to AiReady" />
         <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_buynowCC_LG.gif" border="0" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Buy Now" style="width:100%;max-width:240px;height:auto;" />
       </form>
       <div class="pay-amount-hint">Fixed ${{ usd_price }} USD via PayPal. You will return here after payment.</div>
@@ -569,6 +576,16 @@ async function handlePayPalSubmit(e) {
       body: JSON.stringify({shop})
     });
   } catch (err) {}
+  var normalizedShop = shop.replace(new RegExp('^https?://'), '').split('/')[0].trim().toLowerCase();
+  if (normalizedShop && normalizedShop.indexOf('.myshopify.com') === -1) {
+    normalizedShop += '.myshopify.com';
+  }
+  var custom = document.getElementById('paypalCustom');
+  var ret = document.getElementById('paypalReturn');
+  var cancel = document.getElementById('paypalCancelReturn');
+  if (custom) custom.value = normalizedShop;
+  if (ret) ret.value = '{{ app_base_url }}/paypal/return?shop=' + encodeURIComponent(normalizedShop);
+  if (cancel) cancel.value = '{{ app_base_url }}/upgrade?shop=' + encodeURIComponent(normalizedShop);
   document.getElementById('paypalForm').submit();
   return false;
 }
@@ -2396,6 +2413,7 @@ def _render_app_page(open_upgrade=False, shop_prefill='', url_param=''):
         open_upgrade=open_upgrade,
         shop_prefill=shop_prefill,
         paypal_hosted_button_id=PAYPAL_HOSTED_BUTTON_ID,
+        app_base_url=APP_BASE_URL,
         usd_price=int(USD_PRICE) if USD_PRICE == int(USD_PRICE) else USD_PRICE,
     )
 
@@ -2515,8 +2533,11 @@ def paypal_register_intent():
 def paypal_return():
     """Landing page after PayPal payment (configure in PayPal if available)."""
     shop = normalize_shop(request.args.get('shop', ''))
-    if shop and is_valid_shop(shop) and is_paid(shop):
-        return redirect(f'/app?shop={shop}&unlocked=1')
+    if shop and is_valid_shop(shop):
+        for _ in range(6):
+            if is_paid(shop):
+                return redirect(f'/app?shop={shop}&unlocked=1')
+            time.sleep(1)
     qs = f'shop={shop}' if shop else ''
     return redirect(f'/upgrade?paypal=return&{qs}' if qs else '/upgrade?paypal=return')
 
@@ -2534,13 +2555,16 @@ def paypal_ipn():
     params = dict(p.split('=', 1) for p in raw.split('&') if '=' in p)
     payment_status = unquote_plus(params.get('payment_status', ''))
     txn_id = unquote_plus(params.get('txn_id', ''))
+    receiver_email = unquote_plus(params.get('receiver_email', '')).strip().lower()
+    mc_currency = unquote_plus(params.get('mc_currency', '')).strip().upper()
     mc_gross = unquote_plus(params.get('mc_gross', '0'))
     try:
         amount = float(mc_gross)
     except ValueError:
         amount = 0.0
     shop = normalize_shop(unquote_plus(params.get('custom', '')))
-    if payment_status == 'Completed' and amount + 0.01 >= USD_PRICE:
+    receiver_ok = not PAYPAL_RECEIVER_EMAIL or receiver_email == PAYPAL_RECEIVER_EMAIL
+    if payment_status == 'Completed' and mc_currency == 'USD' and amount + 0.01 >= USD_PRICE and receiver_ok:
         if not shop or not is_valid_shop(shop):
             row = db_execute(
                 'SELECT shop FROM paypal_intents ORDER BY id DESC LIMIT 1',

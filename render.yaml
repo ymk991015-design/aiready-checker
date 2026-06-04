@@ -13,5 +13,7 @@ services:
         value: https://aiready-checker.onrender.com
       - key: PAYPAL_HOSTED_BUTTON_ID
         value: VA8TFCR6A8NMY
+      - key: PAYPAL_RECEIVER_EMAIL
+        sync: false
       - key: USD_PRICE
         value: "9"
