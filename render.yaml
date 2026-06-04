@@ -9,3 +9,15 @@ services:
         value: 3.11.0
       - key: DATABASE_URL
         sync: false
+      - key: APP_BASE_URL
+        value: https://aiready-checker.onrender.com
+      - key: PAYPAL_URL
+        value: https://www.paypal.com/paypalme/MingkunYang/9
+      - key: USD_PRICE
+        value: "9"
+      - key: WECHAT_PAY_ID
+        value: "WwwiLL(**焜)"
+      - key: ALIPAY_ACCOUNT
+        value: "ymk(**焜)"
+      - key: USD_CNY_RATE_FALLBACK
+        value: "7.25"

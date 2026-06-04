@@ -9,14 +9,59 @@ import hashlib
 import base64
 import sqlite3
 import tempfile
+import time
 from urllib.parse import urljoin, urlparse, urlencode
 from concurrent.futures import ThreadPoolExecutor
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static', static_url_path='/static')
 app.secret_key = os.environ.get('FLASK_SECRET', 'aiready-secret-key-2025')
 
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 CRON_SECRET = os.environ.get('CRON_SECRET', 'aiready-cron-2025')
+USD_PRICE = float(os.environ.get('USD_PRICE', '9'))
+PAYPAL_URL = os.environ.get('PAYPAL_URL', 'https://www.paypal.com/paypalme/MingkunYang/9')
+WECHAT_PAY_ID = os.environ.get('WECHAT_PAY_ID', 'WwwiLL(**焜)')
+ALIPAY_ACCOUNT = os.environ.get('ALIPAY_ACCOUNT', 'ymk(**焜)')
+WECHAT_QR_URL = os.environ.get('WECHAT_QR_URL', '/static/pay/wechat-qr.jpg')
+ALIPAY_QR_URL = os.environ.get('ALIPAY_QR_URL', '/static/pay/alipay-qr.jpg')
+USD_CNY_RATE_FALLBACK = float(os.environ.get('USD_CNY_RATE_FALLBACK', '7.25'))
+APP_BASE_URL = os.environ.get('APP_BASE_URL', 'https://aiready-checker.onrender.com').rstrip('/')
+
+_rate_cache = {'rate': None, 'ts': 0, 'date': ''}
+
+
+def get_usd_cny_quote(usd_amount=None):
+    """Return (cny_amount_int, rate_str, rate_date) for display."""
+    usd = USD_PRICE if usd_amount is None else float(usd_amount)
+    now = time.time()
+    rate = _rate_cache['rate']
+    rate_date = _rate_cache['date']
+    if not rate or now - _rate_cache['ts'] > 3600:
+        try:
+            resp = requests.get(
+                'https://api.frankfurter.app/latest?from=USD&to=CNY',
+                timeout=6,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            rate = float(data['rates']['CNY'])
+            rate_date = data.get('date', '')
+            _rate_cache['rate'] = rate
+            _rate_cache['date'] = rate_date
+            _rate_cache['ts'] = now
+        except Exception:
+            rate = USD_CNY_RATE_FALLBACK
+            rate_date = ''
+    cny = int(round(usd * rate))
+    return cny, f'{rate:.2f}', rate_date
+
+
+def abs_pay_url(path):
+    if not path:
+        return ''
+    if path.startswith('http://') or path.startswith('https://'):
+        return path
+    return APP_BASE_URL + path
 DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
 DB_PATH = os.environ.get('DB_PATH', os.path.join(tempfile.gettempdir(), 'aiready.db'))
 USE_POSTGRES = bool(DATABASE_URL)
@@ -365,16 +410,28 @@ HTML_TEMPLATE = """
     /* UPGRADE MODAL */
     .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center; }
     .modal-overlay.visible { display:flex; }
-    .modal-box { background:#fff; border-radius:12px; padding:32px; max-width:420px; width:90%; text-align:center; box-shadow:0 8px 40px rgba(0,0,0,0.18); }
+    .modal-box { background:#fff; border-radius:12px; padding:32px; max-width:440px; width:90%; text-align:center; box-shadow:0 8px 40px rgba(0,0,0,0.18); }
     .modal-icon { font-size:36px; margin-bottom:12px; }
     .modal-title { font-size:20px; font-weight:700; color:var(--text); margin-bottom:8px; }
     .modal-sub { font-size:14px; color:var(--text-sub); margin-bottom:24px; line-height:1.6; }
     .modal-price { font-size:32px; font-weight:800; color:var(--green); margin-bottom:4px; }
+    .modal-price-cny { font-size:22px; color:var(--text-sub); font-weight:700; margin-left:6px; }
     .modal-price-sub { font-size:13px; color:var(--text-sub); margin-bottom:24px; }
+    .modal-rate-note { font-size:12px; color:var(--text-hint); margin-top:-18px; margin-bottom:20px; }
     .modal-features { text-align:left; background:var(--green-bg); border:1px solid var(--green-border); border-radius:8px; padding:14px 18px; margin-bottom:24px; }
     .modal-feature { font-size:13px; color:#005E45; padding:3px 0; }
     .modal-close { margin-top:14px; font-size:13px; color:var(--text-hint); cursor:pointer; }
     .modal-close:hover { color:var(--text-sub); }
+    .pay-btn { width:100%; padding:14px; font-size:15px; display:block; text-align:center; text-decoration:none; box-sizing:border-box; color:#fff; margin-bottom:12px; }
+    .pay-divider { font-size:12px; color:var(--text-hint); margin:14px 0 10px; }
+    .pay-option { background:#F6F6F7; border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px; text-align:left; }
+    .pay-option-title { font-size:13px; font-weight:600; color:var(--text); margin-bottom:6px; }
+    .pay-option-id { font-size:14px; color:var(--green); font-weight:600; word-break:break-all; margin-bottom:8px; }
+    .pay-qr { display:block; max-width:200px; width:100%; margin:0 auto 8px; border-radius:6px; }
+    .pay-copy-btn { width:100%; padding:8px; font-size:13px; background:#fff; border:1px solid var(--border); border-radius:6px; cursor:pointer; color:var(--text); }
+    .pay-copy-btn:hover { background:#F1F8F5; border-color:var(--green-border); }
+    .pay-done-btn { width:100%; padding:12px; font-size:14px; background:#fff; border:1px solid var(--border-strong); border-radius:6px; cursor:pointer; color:var(--text); margin-top:4px; }
+    .pay-done-btn:hover { background:var(--green-bg); border-color:var(--green); color:#005E45; }
 
     @media(max-width: 640px) {
       .metrics { grid-template-columns: 1fr; }
@@ -606,7 +663,7 @@ function renderResults(data) {
     const sc = scoreClass(p.score);
     const passCount = p.present.length;
     const failCount = p.missing.length;
-    const sanitize = s => String(s||'').replace(/['"><]/g,' ').slice(0,200);
+    const sanitize = s => (s||'').replace(/\n|\r/g,' ').replace(/&[a-z]+;/g,'').slice(0,200);
     const en = sanitize(p.name).slice(0,60);
     const eb = sanitize(p.brand).slice(0,40);
     const ed = sanitize(p.description);
@@ -914,6 +971,13 @@ function handlePayPalClick(e) {
   e.stopPropagation();
   setTimeout(showPaidStep, 100);
 }
+function copyPayId(id) {
+  var el = document.getElementById(id);
+  if (!el || !el.textContent) return;
+  navigator.clipboard.writeText(el.textContent.trim()).then(function() {
+    alert('Copied!');
+  }).catch(function() { prompt('Copy:', el.textContent.trim()); });
+}
 function showUpgradeModal(shop) {
   document.getElementById('paypalShop').value = shop || '';
   document.getElementById('modalStep1').style.display = 'block';
@@ -932,13 +996,14 @@ function showPaidStep() {
 async function submitUnlockRequest() {
   const email = document.getElementById('unlockEmail').value.trim();
   const shop = document.getElementById('paypalShop').value;
+  const method = document.getElementById('unlockMethod').value;
   const msg = document.getElementById('unlockMsg');
-  if (!email) { alert('Please enter your PayPal email.'); return; }
+  if (!email) { alert('Please enter your contact info (email, WeChat ID, or phone).'); return; }
   try {
     const res = await fetch('/request-unlock', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({email, shop})
+      body: JSON.stringify({email, shop, method})
     });
     const data = await res.json();
     msg.style.display = 'block';
@@ -1097,7 +1162,8 @@ window.addEventListener('load', function() {
     <div class="modal-icon">&#128274;</div>
     <div class="modal-title">You've used your 5 free actions</div>
     <div class="modal-sub">Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.</div>
-    <div class="modal-price">$9</div>
+    <div class="modal-price">${{ usd_price }}<span class="modal-price-cny">&asymp; &yen;{{ cny_price }}</span></div>
+    <div class="modal-rate-note">汇率 1 USD = {{ usd_cny_rate }} CNY{% if rate_date %}（{{ rate_date }}）{% endif %}</div>
     <div class="modal-price-sub">one-time payment &mdash; unlimited forever</div>
     <div class="modal-features">
       <div class="modal-feature">&#10003; &nbsp; Unlimited AI description generation</div>
@@ -1106,12 +1172,31 @@ window.addEventListener('load', function() {
       <div class="modal-feature">&#10003; &nbsp; Weekly score reports via email</div>
     </div>
     <div id="modalStep1">
-      <a class="btn-primary" style="width:100%;padding:14px;font-size:15px;display:block;text-align:center;text-decoration:none;box-sizing:border-box;" href="https://www.paypal.com/paypalme/MingkunYang/9" target="_blank" rel="noopener noreferrer" onclick="handlePayPalClick(event)">Pay $9 via PayPal &rarr;</a>
+      <a class="btn-primary pay-btn" href="{{ paypal_url }}" target="_blank" rel="noopener noreferrer" onclick="handlePayPalClick(event)">Pay ${{ usd_price }} via PayPal &rarr;</a>
+      <div class="pay-divider">或扫码支付人民币 <strong>&yen;{{ cny_price }}</strong>（约 ${{ usd_price }} &times; {{ usd_cny_rate }}）</div>
+      <div class="pay-option">
+        <div class="pay-option-title">微信支付 WeChat Pay &yen;{{ cny_price }}</div>
+        {% if wechat_qr_url %}<img src="{{ wechat_qr_url }}" alt="WeChat QR" class="pay-qr" />{% endif %}
+        <div class="pay-option-id" id="wechatPayId">{{ wechat_pay_id }}</div>
+        <button type="button" class="pay-copy-btn" onclick="copyPayId('wechatPayId')">复制微信号 Copy WeChat ID</button>
+      </div>
+      <div class="pay-option">
+        <div class="pay-option-title">支付宝 Alipay &yen;{{ cny_price }}</div>
+        {% if alipay_qr_url %}<img src="{{ alipay_qr_url }}" alt="Alipay QR" class="pay-qr" />{% endif %}
+        <div class="pay-option-id" id="alipayAccount">{{ alipay_account }}</div>
+        <button type="button" class="pay-copy-btn" onclick="copyPayId('alipayAccount')">复制支付宝账号 Copy Alipay</button>
+      </div>
+      <button type="button" class="pay-done-btn" onclick="showPaidStep()">我已付款，提交核实 I paid &rarr;</button>
     </div>
     <div id="modalStep2" style="display:none;margin-top:16px;">
-      <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Enter your PayPal email so we can verify and unlock your store:</p>
-      <input type="email" id="unlockEmail" class="scan-input" placeholder="your@paypal.email" style="margin-bottom:8px;" />
-      <button class="btn-primary" style="width:100%;padding:12px;" onclick="submitUnlockRequest()">Confirm &amp; Unlock</button>
+      <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">付款后请留下联系方式，方便核实并解锁店铺：</p>
+      <select id="unlockMethod" class="scan-input" style="margin-bottom:8px;">
+        <option value="paypal">PayPal</option>
+        <option value="wechat">微信 WeChat</option>
+        <option value="alipay">支付宝 Alipay</option>
+      </select>
+      <input type="text" id="unlockEmail" class="scan-input" placeholder="邮箱 / 微信号 / 手机号" style="margin-bottom:8px;" />
+      <button class="btn-primary" style="width:100%;padding:12px;" onclick="submitUnlockRequest()">提交解锁申请 Submit</button>
       <div id="unlockMsg" style="margin-top:10px;font-size:13px;display:none;"></div>
     </div>
     <input type="hidden" id="paypalShop" value="">
@@ -1122,43 +1207,6 @@ window.addEventListener('load', function() {
 </body>
 </html>
 """
-
-def schema_from_shopify_product(data):
-    """Flatten Shopify product JSON into schema-like structure."""
-    if not data:
-        return None
-    variants = data.get('variants', [])
-    options = {o['name'].lower(): o.get('values', []) for o in data.get('options', [])}
-    images = data.get('images', [])
-    shopify_schema = {
-        '@type': 'Product',
-        '_shopify_id': str(data.get('id', '')),
-        'name': data.get('title', ''),
-        'description': data.get('body_html', ''),
-        'image': images[0].get('src') if images else None,
-        'brand': data.get('vendor', ''),
-        'sku': variants[0].get('sku', '') if variants else '',
-        'offers': {
-            'price': variants[0].get('price') if variants else None,
-            'availability': 'InStock' if any(v.get('available') for v in variants) else 'OutOfStock',
-        } if variants else None,
-    }
-    for opt_name, values in options.items():
-        if values:
-            if 'color' in opt_name or 'colour' in opt_name:
-                shopify_schema['color'] = values[0]
-            elif 'size' in opt_name:
-                shopify_schema['size'] = values[0]
-            elif 'material' in opt_name or 'fabric' in opt_name:
-                shopify_schema['material'] = values[0]
-    for v in variants:
-        if not shopify_schema.get('gtin') and v.get('barcode'):
-            shopify_schema['gtin'] = v['barcode']
-        if not shopify_schema.get('mpn') and v.get('sku'):
-            shopify_schema['mpn'] = v['sku']
-        if shopify_schema.get('gtin') and shopify_schema.get('mpn'):
-            break
-    return shopify_schema
 
 def get_product_urls(store_url):
     """Get product URLs from Shopify store using multiple methods."""
@@ -1171,7 +1219,6 @@ def get_product_urls(store_url):
         'Accept-Language': 'en-US,en;q=0.5',
     }
     urls = []
-    products_data = []
 
     # Method 1: products.json (most reliable)
     try:
@@ -1182,9 +1229,6 @@ def get_product_urls(store_url):
                 handle = p.get('handle', '')
                 if handle:
                     urls.append(f"{base}/products/{handle}")
-                    products_data.append(p)
-            if urls:
-                return urls[:20], products_data[:20]
     except Exception:
         pass
 
@@ -1237,7 +1281,7 @@ def get_product_urls(store_url):
         except Exception:
             pass
 
-    return urls[:20], products_data[:20]
+    return urls[:20]
 
 def has_value(value):
     if value is None:
@@ -1315,27 +1359,61 @@ def extract_schema(url):
         json_url = url.rstrip('/') + '.json'
         r = requests.get(json_url, headers=headers, timeout=12)
         if r.status_code == 200:
-            shopify_schema = schema_from_shopify_product(r.json().get('product', {}))
+            data = r.json().get('product', {})
+            if data:
+                # Flatten Shopify product data into schema-like structure
+                variants = data.get('variants', [])
+                options = {o['name'].lower(): o.get('values', []) for o in data.get('options', [])}
+                images = data.get('images', [])
+                shopify_schema = {
+                    '@type': 'Product',
+                    '_shopify_id': str(data.get('id', '')),
+                    'name': data.get('title', ''),
+                    'description': data.get('body_html', ''),
+                    'image': images[0].get('src') if images else None,
+                    'brand': data.get('vendor', ''),
+                    'sku': variants[0].get('sku', '') if variants else '',
+                    'offers': {
+                        'price': variants[0].get('price') if variants else None,
+                        'availability': 'InStock' if any(v.get('available') for v in variants) else 'OutOfStock',
+                    } if variants else None,
+                }
+                # Map option names to schema fields
+                for opt_name, values in options.items():
+                    if values:
+                        if 'color' in opt_name or 'colour' in opt_name:
+                            shopify_schema['color'] = values[0]
+                        elif 'size' in opt_name:
+                            shopify_schema['size'] = values[0]
+                        elif 'material' in opt_name or 'fabric' in opt_name:
+                            shopify_schema['material'] = values[0]
+                # Check for GTIN/MPN in variants
+                for v in variants:
+                    if not shopify_schema.get('gtin') and v.get('barcode'):
+                        shopify_schema['gtin'] = v['barcode']
+                    if not shopify_schema.get('mpn') and v.get('sku'):
+                        shopify_schema['mpn'] = v['sku']
+                    if shopify_schema.get('gtin') and shopify_schema.get('mpn'):
+                        break
     except Exception:
         pass
 
     # Method 2: Parse JSON-LD from static HTML and merge it with Shopify JSON.
-    if not shopify_schema:
-        try:
-            r = requests.get(url, headers=headers, timeout=12)
-            if r.status_code == 200:
-                soup = BeautifulSoup(r.text, 'html.parser')
-                scripts = soup.find_all('script', type='application/ld+json')
-                for script in scripts:
-                    try:
-                        data = json.loads(script.string or '{}')
-                        jsonld_schema = find_product_schema(data)
-                        if jsonld_schema:
-                            break
-                    except Exception:
-                        continue
-        except Exception:
-            pass
+    try:
+        r = requests.get(url, headers=headers, timeout=12)
+        if r.status_code == 200:
+            soup = BeautifulSoup(r.text, 'html.parser')
+            scripts = soup.find_all('script', type='application/ld+json')
+            for script in scripts:
+                try:
+                    data = json.loads(script.string or '{}')
+                    jsonld_schema = find_product_schema(data)
+                    if jsonld_schema:
+                        break
+                except Exception:
+                    continue
+    except Exception:
+        pass
 
     if shopify_schema or jsonld_schema:
         return merge_product_schema(shopify_schema, jsonld_schema)
@@ -1895,7 +1973,20 @@ def index():
 @app.route('/app')
 def app_page():
     url_param = request.args.get('url', '')
-    return render_template_string(HTML_TEMPLATE, prefill_url=url_param)
+    cny_price, usd_cny_rate, rate_date = get_usd_cny_quote()
+    return render_template_string(
+        HTML_TEMPLATE,
+        prefill_url=url_param,
+        paypal_url=PAYPAL_URL,
+        usd_price=int(USD_PRICE) if USD_PRICE == int(USD_PRICE) else USD_PRICE,
+        wechat_pay_id=WECHAT_PAY_ID,
+        alipay_account=ALIPAY_ACCOUNT,
+        wechat_qr_url=abs_pay_url(WECHAT_QR_URL),
+        alipay_qr_url=abs_pay_url(ALIPAY_QR_URL),
+        cny_price=cny_price,
+        usd_cny_rate=usd_cny_rate,
+        rate_date=rate_date,
+    )
 
 @app.route('/scan', methods=['POST'])
 def scan():
@@ -1903,16 +1994,11 @@ def scan():
     store_url = data.get('url', '').strip()
     if not store_url:
         return jsonify({'error': 'Please provide a store URL.'})
-    product_urls, products_json = get_product_urls(store_url)
+    product_urls = get_product_urls(store_url)
     if not product_urls:
         return jsonify({'error': 'Could not find products. Make sure the store URL is correct and the store is live.'})
-    products_by_handle = {p['handle']: p for p in products_json if p.get('handle')}
     def scan_one(url):
-        handle = url.rstrip('/').split('/')[-1]
-        if handle in products_by_handle:
-            schema = schema_from_shopify_product(products_by_handle[handle])
-        else:
-            schema = extract_schema(url)
+        schema = extract_schema(url)
         if not schema:
             return None
         score, present, missing = score_product(schema)
@@ -2244,4 +2330,159 @@ def update_product():
     if resp.status_code != 200:
         return jsonify({'error': 'Failed to update product.'}), 400
     increment_usage(shop_key)
-    return j
+    return jsonify({'success': True})
+
+
+ADMIN_SECRET = os.environ.get('ADMIN_SECRET', 'aiready-admin-2025')
+
+@app.route('/request-unlock', methods=['POST'])
+def request_unlock():
+    """User submits contact info after paying. Stored for admin review."""
+    data = request.get_json()
+    email = data.get('email', '').strip()
+    method = data.get('method', 'paypal').strip().lower()
+    shop = data.get('shop', '').strip().lower()
+    if not email or not shop:
+        return jsonify({'error': 'Contact and shop required.'}), 400
+    note = f'[{method}] {email}'
+    db_execute('INSERT INTO unlock_requests (email, shop) VALUES (?, ?)', (note, shop))
+    return jsonify({'success': True})
+
+
+@app.route('/admin/unlock', methods=['POST'])
+def admin_unlock():
+    """Admin endpoint to manually unlock a shop after verifying payment."""
+    secret = request.headers.get('X-Admin-Secret', '')
+    if secret != ADMIN_SECRET:
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.get_json()
+    shop = data.get('shop', '').strip().lower()
+    if not shop:
+        return jsonify({'error': 'shop required'}), 400
+    db_execute('''INSERT INTO paid_shops (shop, paypal_txn_id, paid_at)
+        VALUES (?, ?, datetime('now'))
+        ON CONFLICT(shop) DO UPDATE SET
+            paypal_txn_id=excluded.paypal_txn_id,
+            paid_at=datetime('now')
+    ''', (shop, 'manual'))
+    return jsonify({'success': True, 'shop': shop})
+
+
+@app.route('/admin/requests', methods=['GET'])
+def admin_requests():
+    """List pending unlock requests."""
+    secret = request.headers.get('X-Admin-Secret', '')
+    if secret != ADMIN_SECRET:
+        return jsonify({'error': 'Unauthorized'}), 401
+    rows = db_execute('SELECT id, email, shop, created_at FROM unlock_requests ORDER BY created_at DESC', fetchall=True)
+    return jsonify([{'id': r[0], 'email': r[1], 'shop': r[2], 'created_at': r[3]} for r in rows])
+
+
+@app.route('/subscribe', methods=['POST'])
+def subscribe():
+    data = request.get_json()
+    email = data.get('email', '').strip().lower()
+    shop = data.get('shop', '').strip().lower()
+    if not email or not shop:
+        return jsonify({'error': 'Email and shop required.'}), 400
+    try:
+        db_execute('''INSERT INTO subscriptions (email, shop) VALUES (?, ?)
+            ON CONFLICT(email, shop) DO NOTHING
+        ''', (email, shop))
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/run-weekly-scan', methods=['POST'])
+def run_weekly_scan():
+    """Called by external cron job weekly. Scans all subscribed shops and emails reports."""
+    secret = request.headers.get('X-Cron-Secret', '')
+    if secret != CRON_SECRET:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    subs = db_execute('SELECT id, email, shop, last_score FROM subscriptions', fetchall=True)
+
+    sent = 0
+    for sub_id, email, shop, last_score in subs:
+        try:
+            # Scan the store
+            urls = get_product_urls(shop)
+            if not urls:
+                continue
+            results = []
+            for url in urls[:10]:
+                schema = extract_schema(url)
+                if not schema:
+                    continue
+                score, present, missing = score_product(schema)
+                name = schema.get('name', url.split('/')[-1].replace('-', ' ').title())
+                results.append({'name': name, 'score': score, 'missing': [f['label'] for f in missing]})
+            if not results:
+                continue
+
+            avg = round(sum(r['score'] for r in results) / len(results))
+            delta = avg - last_score if last_score else 0
+            delta_str = f"+{delta}" if delta > 0 else str(delta)
+
+            # Build email HTML
+            rows = ''.join(
+                f"<tr><td style='padding:8px;border-bottom:1px solid #eee;'>{r['name'][:50]}</td>"
+                f"<td style='padding:8px;border-bottom:1px solid #eee;color:{'#008060' if r['score']>=70 else '#B98900' if r['score']>=40 else '#D72C0D'};font-weight:600;'>{r['score']}/100</td>"
+                f"<td style='padding:8px;border-bottom:1px solid #eee;font-size:12px;color:#6D7175;'>{', '.join(r['missing'][:3])}</td></tr>"
+                for r in results
+            )
+            html_body = f"""
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:600px;margin:0 auto;">
+  <div style="background:#1A1A1A;padding:20px 24px;border-radius:8px 8px 0 0;">
+    <span style="color:#fff;font-size:18px;font-weight:700;">Ai<span style="color:#95BF47;">Ready</span></span>
+    <span style="color:#999;font-size:13px;margin-left:12px;">Weekly AI Readiness Report</span>
+  </div>
+  <div style="background:#fff;border:1px solid #E4E5E7;border-top:none;padding:24px;border-radius:0 0 8px 8px;">
+    <h2 style="font-size:20px;color:#202223;margin:0 0 4px;">{shop}</h2>
+    <p style="color:#6D7175;font-size:14px;margin:0 0 20px;">
+      Average score: <strong style="color:{'#008060' if avg>=70 else '#B98900' if avg>=40 else '#D72C0D'};">{avg}/100</strong>
+      {f' &nbsp; <span style="color:{"#008060" if delta>0 else "#D72C0D"};">({delta_str} from last week)</span>' if last_score else ''}
+    </p>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr>
+        <th style="text-align:left;padding:8px;background:#F6F6F7;color:#6D7175;font-size:11px;text-transform:uppercase;">Product</th>
+        <th style="text-align:left;padding:8px;background:#F6F6F7;color:#6D7175;font-size:11px;text-transform:uppercase;">Score</th>
+        <th style="text-align:left;padding:8px;background:#F6F6F7;color:#6D7175;font-size:11px;text-transform:uppercase;">Top Missing Fields</th>
+      </tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+    <div style="margin-top:24px;text-align:center;">
+      <a href="https://aiready-checker.onrender.com/?shop={shop}" style="background:#008060;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px;">View Full Report</a>
+    </div>
+    <p style="margin-top:20px;font-size:12px;color:#8C9196;text-align:center;">
+      You're receiving this because you subscribed at aiready-checker.onrender.com
+    </p>
+  </div>
+</div>"""
+
+            # Send via Resend
+            if RESEND_API_KEY:
+                requests.post(
+                    'https://api.resend.com/emails',
+                    headers={'Authorization': f'Bearer {RESEND_API_KEY}', 'Content-Type': 'application/json'},
+                    json={
+                        'from': 'AiReady <reports@aiready.io>',
+                        'to': [email],
+                        'subject': f'Weekly AI Readiness Report: {shop} scored {avg}/100',
+                        'html': html_body,
+                    },
+                    timeout=10
+                )
+
+            # Update last_score
+            db_execute('UPDATE subscriptions SET last_score=?, last_scanned=CURRENT_TIMESTAMP WHERE id=?', (avg, sub_id))
+            sent += 1
+        except Exception:
+            continue
+
+    return jsonify({'sent': sent, 'total': len(subs)})
+
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5001)
