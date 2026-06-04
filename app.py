@@ -9,8 +9,7 @@ import hashlib
 import base64
 import sqlite3
 import tempfile
-import time
-from urllib.parse import urljoin, urlparse, urlencode
+from urllib.parse import urljoin, urlparse, urlencode, unquote_plus
 from concurrent.futures import ThreadPoolExecutor
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
@@ -20,48 +19,7 @@ RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 CRON_SECRET = os.environ.get('CRON_SECRET', 'aiready-cron-2025')
 USD_PRICE = float(os.environ.get('USD_PRICE', '9'))
 PAYPAL_URL = os.environ.get('PAYPAL_URL', 'https://www.paypal.com/paypalme/MingkunYang/9')
-WECHAT_PAY_ID = os.environ.get('WECHAT_PAY_ID', 'WwwiLL(**焜)')
-ALIPAY_ACCOUNT = os.environ.get('ALIPAY_ACCOUNT', 'ymk(**焜)')
-WECHAT_QR_URL = os.environ.get('WECHAT_QR_URL', '/static/pay/wechat-qr.jpg')
-ALIPAY_QR_URL = os.environ.get('ALIPAY_QR_URL', '/static/pay/alipay-qr.jpg')
-USD_CNY_RATE_FALLBACK = float(os.environ.get('USD_CNY_RATE_FALLBACK', '7.25'))
 APP_BASE_URL = os.environ.get('APP_BASE_URL', 'https://aiready-checker.onrender.com').rstrip('/')
-
-_rate_cache = {'rate': None, 'ts': 0, 'date': ''}
-
-
-def get_usd_cny_quote(usd_amount=None):
-    """Return (cny_amount_int, rate_str, rate_date) for display."""
-    usd = USD_PRICE if usd_amount is None else float(usd_amount)
-    now = time.time()
-    rate = _rate_cache['rate']
-    rate_date = _rate_cache['date']
-    if not rate or now - _rate_cache['ts'] > 3600:
-        try:
-            resp = requests.get(
-                'https://api.frankfurter.app/latest?from=USD&to=CNY',
-                timeout=6,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            rate = float(data['rates']['CNY'])
-            rate_date = data.get('date', '')
-            _rate_cache['rate'] = rate
-            _rate_cache['date'] = rate_date
-            _rate_cache['ts'] = now
-        except Exception:
-            rate = USD_CNY_RATE_FALLBACK
-            rate_date = ''
-    cny = int(round(usd * rate))
-    return cny, f'{rate:.2f}', rate_date
-
-
-def abs_pay_url(path):
-    if not path:
-        return ''
-    if path.startswith('http://') or path.startswith('https://'):
-        return path
-    return APP_BASE_URL + path
 DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
 DB_PATH = os.environ.get('DB_PATH', os.path.join(tempfile.gettempdir(), 'aiready.db'))
 USE_POSTGRES = bool(DATABASE_URL)
@@ -140,6 +98,11 @@ def init_db():
         id {id_type},
         email TEXT,
         shop TEXT,
+        created_at {now_type}
+    )''')
+    db_execute(f'''CREATE TABLE IF NOT EXISTS paypal_intents (
+        id {id_type},
+        shop TEXT NOT NULL,
         created_at {now_type}
     )''')
 
@@ -976,16 +939,23 @@ async function bulkFix(btn) {
   alert(`Done. Saved ${saved} products to Shopify${failed ? `; ${failed} failed` : ''}.`);
 }
 
-function handlePayPalClick(e) {
+async function handlePayPalClick(e) {
   e.stopPropagation();
+  const shop = getPaywallShop();
+  if (!shop) {
+    e.preventDefault();
+    alert('Please enter your store URL first (e.g. yourstore.myshopify.com).');
+    return false;
+  }
+  try {
+    await fetch('/paypal/register-intent', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({shop})
+    });
+  } catch (err) {}
   setTimeout(showPaidStep, 100);
-}
-function copyPayId(id) {
-  var el = document.getElementById(id);
-  if (!el || !el.textContent) return;
-  navigator.clipboard.writeText(el.textContent.trim()).then(function() {
-    alert('Copied!');
-  }).catch(function() { prompt('Copy:', el.textContent.trim()); });
+  return true;
 }
 function showUpgradeModal(shop) {
   var modal = document.getElementById('upgradeModal');
@@ -1038,18 +1008,16 @@ function getPaywallShop() {
 async function submitUnlockRequest() {
   const email = document.getElementById('unlockEmail').value.trim();
   const shop = getPaywallShop();
-  const method = document.getElementById('unlockMethod').value;
-  const amountCny = document.getElementById('payAmountCny') ? document.getElementById('payAmountCny').value : '';
   const msg = document.getElementById('unlockMsg');
   if (!shop) { alert('Please enter your store URL (e.g. yourstore.myshopify.com).'); return; }
-  if (!email) { alert('Please enter your contact info (email, WeChat ID, or phone).'); return; }
+  if (!email) { alert('Please enter the PayPal email you used to pay.'); return; }
   const btn = document.querySelector('#modalStep2 .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = 'Unlocking...'; }
   try {
     const res = await fetch('/request-unlock', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({email, shop, method, amount_cny: amountCny})
+      body: JSON.stringify({email, shop, method: 'paypal'})
     });
     const data = await res.json();
     if (data.success && data.redirect) {
@@ -1218,6 +1186,11 @@ window.addEventListener('load', function() {
     var shop = params.get('shop') || document.getElementById('storeUrl').value.trim() || '';
     showUpgradeModal(shop);
   }
+  if (params.get('paypal') === 'return') {
+    var shop = params.get('shop') || document.getElementById('storeUrl').value.trim() || '';
+    showUpgradeModal(shop);
+    showPaidStep();
+  }
   if (params.get('unlocked') === '1') {
     var shop = params.get('shop') || '';
     var banner = document.getElementById('unlimitedBanner');
@@ -1243,9 +1216,8 @@ window.addEventListener('load', function() {
     <div class="modal-icon">&#128274;</div>
     <div class="modal-title">{% if open_upgrade %}Upgrade to Unlimited{% else %}You've used your 5 free actions{% endif %}</div>
     <div class="modal-sub">{% if open_upgrade %}One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.{% else %}Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.{% endif %}</div>
-    <div class="modal-price">${{ usd_price }} <span class="modal-price-cny">参考 &asymp; &yen;{{ cny_price }}</span></div>
-    <div class="modal-rate-note">PayPal 固定 ${{ usd_price }}；微信/支付宝金额由您自定（参考汇率 1 USD = {{ usd_cny_rate }} CNY）</div>
-    <div class="modal-price-sub">one-time payment &mdash; unlimited forever</div>
+    <div class="modal-price">${{ usd_price }}</div>
+    <div class="modal-price-sub">one-time via PayPal &mdash; unlimited forever</div>
     <div class="pay-store-row">
       <label class="pay-amount-label">店铺域名 Store URL <span style="color:#D72C0D">*</span></label>
       <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="document.getElementById('paypalShop').value=this.value" />
@@ -1257,38 +1229,14 @@ window.addEventListener('load', function() {
       <div class="modal-feature">&#10003; &nbsp; Weekly score reports via email</div>
     </div>
     <div id="modalStep1">
-      <div class="pay-amount-row">
-        <label class="pay-amount-label" for="payAmountCny">付款金额 Payment amount (CNY) &mdash; 微信/支付宝扫码时填写</label>
-        <input type="number" id="payAmountCny" class="scan-input" min="0.01" step="0.01" value="{{ cny_price }}" placeholder="自定金额" />
-        <div class="pay-amount-hint">Suggested &yen;{{ cny_price }} (ref. ${{ usd_price }}). You may enter any amount when paying via WeChat or Alipay.</div>
-      </div>
-      <a class="btn-primary pay-btn" href="{{ paypal_url }}" target="_blank" rel="noopener noreferrer" onclick="handlePayPalClick(event)">Pay ${{ usd_price }} via PayPal &rarr;</a>
-      <div class="pay-divider">或扫码支付（金额自定，按上方填写）</div>
-      <div class="pay-option">
-        <div class="pay-option-title">微信支付 WeChat Pay</div>
-        {% if wechat_qr_url %}<img src="{{ wechat_qr_url }}" alt="WeChat QR" class="pay-qr" />{% endif %}
-        <div class="pay-amount-hint">打开微信扫一扫，在付款页输入上方金额（可修改）</div>
-        <div class="pay-option-id" id="wechatPayId">{{ wechat_pay_id }}</div>
-        <button type="button" class="pay-copy-btn" onclick="copyPayId('wechatPayId')">复制微信号 Copy WeChat ID</button>
-      </div>
-      <div class="pay-option">
-        <div class="pay-option-title">支付宝 Alipay</div>
-        {% if alipay_qr_url %}<img src="{{ alipay_qr_url }}" alt="Alipay QR" class="pay-qr" />{% endif %}
-        <div class="pay-amount-hint">打开支付宝扫一扫，在付款页输入上方金额（可修改）</div>
-        <div class="pay-option-id" id="alipayAccount">{{ alipay_account }}</div>
-        <button type="button" class="pay-copy-btn" onclick="copyPayId('alipayAccount')">复制支付宝账号 Copy Alipay</button>
-      </div>
-      <button type="button" class="pay-done-btn" onclick="showPaidStep()">我已付款，继续解锁 I paid &rarr;</button>
+      <a class="btn-primary pay-btn" href="{{ paypal_url }}" target="_blank" rel="noopener noreferrer" onclick="return handlePayPalClick(event)">Pay ${{ usd_price }} via PayPal &rarr;</a>
+      <div class="pay-amount-hint">Fixed ${{ usd_price }} USD. After paying on PayPal, return here to confirm.</div>
+      <button type="button" class="pay-done-btn" onclick="showPaidStep()">I paid on PayPal &rarr;</button>
     </div>
     <div id="modalStep2" style="display:none;margin-top:16px;">
-      <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">付款后请留下联系方式，方便核实并解锁店铺：</p>
-      <select id="unlockMethod" class="scan-input" style="margin-bottom:8px;">
-        <option value="paypal">PayPal</option>
-        <option value="wechat">微信 WeChat</option>
-        <option value="alipay">支付宝 Alipay</option>
-      </select>
-      <input type="text" id="unlockEmail" class="scan-input" placeholder="邮箱 / 微信号 / 手机号" style="margin-bottom:8px;" />
-      <button class="btn-primary" style="width:100%;padding:12px;" onclick="submitUnlockRequest()">提交解锁申请 Submit</button>
+      <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Enter the PayPal email you used to pay $9:</p>
+      <input type="email" id="unlockEmail" class="scan-input" placeholder="your@paypal.email" style="margin-bottom:8px;" />
+      <button class="btn-primary" style="width:100%;padding:12px;" onclick="submitUnlockRequest()">Confirm payment &amp; unlock</button>
       <div id="unlockMsg" style="margin-top:10px;font-size:13px;display:none;"></div>
     </div>
     <input type="hidden" id="paypalShop" value="{{ shop_prefill or '' }}">
@@ -2063,7 +2011,6 @@ def index():
     return render_template_string(LANDING_TEMPLATE)
 
 def _render_app_page(open_upgrade=False, shop_prefill='', url_param=''):
-    cny_price, usd_cny_rate, rate_date = get_usd_cny_quote()
     return render_template_string(
         HTML_TEMPLATE,
         prefill_url=url_param,
@@ -2071,13 +2018,6 @@ def _render_app_page(open_upgrade=False, shop_prefill='', url_param=''):
         shop_prefill=shop_prefill,
         paypal_url=PAYPAL_URL,
         usd_price=int(USD_PRICE) if USD_PRICE == int(USD_PRICE) else USD_PRICE,
-        wechat_pay_id=WECHAT_PAY_ID,
-        alipay_account=ALIPAY_ACCOUNT,
-        wechat_qr_url=abs_pay_url(WECHAT_QR_URL),
-        alipay_qr_url=abs_pay_url(ALIPAY_QR_URL),
-        cny_price=cny_price,
-        usd_cny_rate=usd_cny_rate,
-        rate_date=rate_date,
     )
 
 
@@ -2171,11 +2111,31 @@ def api_usage():
     return jsonify({'shop': shop, 'paid': paid, 'used': used, 'remaining': remaining, 'limit': FREE_LIMIT})
 
 
+@app.route('/paypal/register-intent', methods=['POST'])
+def paypal_register_intent():
+    """Remember which shop is paying before user opens PayPal."""
+    data = request.get_json() or {}
+    shop = normalize_shop(data.get('shop', ''))
+    if not shop or not is_valid_shop(shop):
+        return jsonify({'error': 'Invalid store URL. Use your myshopify.com domain.'}), 400
+    db_execute('INSERT INTO paypal_intents (shop) VALUES (?)', (shop,))
+    return jsonify({'success': True, 'paypal_url': PAYPAL_URL})
+
+
+@app.route('/paypal/return')
+def paypal_return():
+    """Landing page after PayPal payment (configure in PayPal if available)."""
+    shop = normalize_shop(request.args.get('shop', ''))
+    if shop and is_valid_shop(shop) and is_paid(shop):
+        return redirect(f'/app?shop={shop}&unlocked=1')
+    qs = f'shop={shop}' if shop else ''
+    return redirect(f'/upgrade?paypal=return&{qs}' if qs else '/upgrade?paypal=return')
+
+
 @app.route('/paypal/ipn', methods=['POST'])
 def paypal_ipn():
-    """Verify PayPal IPN and mark shop as paid."""
+    """Verify PayPal IPN and mark shop as paid automatically."""
     raw = request.get_data(as_text=True)
-    # Step 1: post back to PayPal for verification
     verify_url = 'https://ipnpb.paypal.com/cgi-bin/webscr'
     verify_resp = requests.post(verify_url, data='cmd=_notify-validate&' + raw,
                                 headers={'Content-Type': 'application/x-www-form-urlencoded'},
@@ -2183,17 +2143,29 @@ def paypal_ipn():
     if verify_resp.text != 'VERIFIED':
         return 'INVALID', 400
     params = dict(p.split('=', 1) for p in raw.split('&') if '=' in p)
-    from urllib.parse import unquote_plus
     payment_status = unquote_plus(params.get('payment_status', ''))
     txn_id = unquote_plus(params.get('txn_id', ''))
-    shop = unquote_plus(params.get('custom', '')).strip().lower()
-    if payment_status == 'Completed' and shop:
-        db_execute('''INSERT INTO paid_shops (shop, paypal_txn_id, paid_at)
-            VALUES (?, ?, datetime('now'))
-            ON CONFLICT(shop) DO UPDATE SET
-                paypal_txn_id=excluded.paypal_txn_id,
-                paid_at=datetime('now')
-        ''', (shop, txn_id))
+    mc_gross = unquote_plus(params.get('mc_gross', '0'))
+    try:
+        amount = float(mc_gross)
+    except ValueError:
+        amount = 0.0
+    shop = normalize_shop(unquote_plus(params.get('custom', '')))
+    if payment_status == 'Completed' and amount + 0.01 >= USD_PRICE:
+        if not shop or not is_valid_shop(shop):
+            row = db_execute(
+                'SELECT shop FROM paypal_intents ORDER BY id DESC LIMIT 1',
+                fetchone=True,
+            )
+            if row:
+                shop = row[0]
+        if shop and is_valid_shop(shop):
+            db_execute('''INSERT INTO paid_shops (shop, paypal_txn_id, paid_at)
+                VALUES (?, ?, datetime('now'))
+                ON CONFLICT(shop) DO UPDATE SET
+                    paypal_txn_id=excluded.paypal_txn_id,
+                    paid_at=datetime('now')
+            ''', (shop, txn_id or 'paypal-ipn'))
     return 'OK', 200
 
 
@@ -2447,25 +2419,23 @@ ADMIN_SECRET = os.environ.get('ADMIN_SECRET', 'aiready-admin-2025')
 
 @app.route('/request-unlock', methods=['POST'])
 def request_unlock():
-    """User confirms payment; unlock store and redirect to unlimited app."""
+    """User confirms PayPal payment; unlock store and redirect to unlimited app."""
     data = request.get_json() or {}
-    email = data.get('email', '').strip()
-    method = data.get('method', 'paypal').strip().lower()
-    amount_cny = data.get('amount_cny', '')
+    email = data.get('email', '').strip().lower()
     shop = normalize_shop(data.get('shop', ''))
     if not email or not shop:
-        return jsonify({'error': 'Contact and shop required.'}), 400
+        return jsonify({'error': 'PayPal email and store URL required.'}), 400
     if not is_valid_shop(shop):
         return jsonify({'error': 'Invalid store URL. Use your myshopify.com domain.'}), 400
-    amount_note = f' amount=¥{amount_cny}' if amount_cny else ''
-    note = f'[{method}] {email}{amount_note}'
+    note = f'[paypal] {email}'
     db_execute('INSERT INTO unlock_requests (email, shop) VALUES (?, ?)', (note, shop))
-    db_execute('''INSERT INTO paid_shops (shop, paypal_txn_id, paid_at)
-        VALUES (?, ?, datetime('now'))
-        ON CONFLICT(shop) DO UPDATE SET
-            paypal_txn_id=excluded.paypal_txn_id,
-            paid_at=datetime('now')
-    ''', (shop, f'{method}-self-report'))
+    if not is_paid(shop):
+        db_execute('''INSERT INTO paid_shops (shop, paypal_txn_id, paid_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(shop) DO UPDATE SET
+                paypal_txn_id=excluded.paypal_txn_id,
+                paid_at=datetime('now')
+        ''', (shop, 'paypal-confirm'))
     redirect_url = f'{APP_BASE_URL}/app?shop={shop}&unlocked=1'
     return jsonify({'success': True, 'redirect': redirect_url})
 

@@ -15,9 +15,3 @@ services:
         value: https://www.paypal.com/paypalme/MingkunYang/9
       - key: USD_PRICE
         value: "9"
-      - key: WECHAT_PAY_ID
-        value: "WwwiLL(**焜)"
-      - key: ALIPAY_ACCOUNT
-        value: "ymk(**焜)"
-      - key: USD_CNY_RATE_FALLBACK
-        value: "7.25"
