@@ -980,6 +980,18 @@ function copyPayId(id) {
 }
 function showUpgradeModal(shop) {
   document.getElementById('paypalShop').value = shop || '';
+  var fromPricing = new URLSearchParams(window.location.search).get('upgrade') === '1';
+  var title = document.querySelector('#upgradeModal .modal-title');
+  var sub = document.querySelector('#upgradeModal .modal-sub');
+  if (title && sub) {
+    if (fromPricing) {
+      title.textContent = 'Upgrade to Unlimited';
+      sub.textContent = 'One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.';
+    } else {
+      title.textContent = "You've used your 5 free actions";
+      sub.textContent = 'Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.';
+    }
+  }
   document.getElementById('modalStep1').style.display = 'block';
   document.getElementById('modalStep2').style.display = 'none';
   document.getElementById('upgradeModal').classList.add('visible');
