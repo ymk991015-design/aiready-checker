@@ -632,7 +632,7 @@ const FIX_HINTS = {
   'Price / Offers': 'Ensure at least one variant has a price set',
 };
 
-let lastData = null;
+var lastData = null;
 
 function scoreClass(s) {
   if (s >= 70) return 'score-high';
@@ -662,7 +662,7 @@ window.renderResults = function renderResults(data) {
   window.lastData = data;
   const results = document.getElementById('results');
   const s = data.summary;
-  const totalIssues = data.products.reduce((a,p) => a + p.missing.length, 0);
+  const totalIssues = data.products.reduce((a,p) => a + (p.missing || []).length, 0);
   const maxCount = s.top_issues.length ? s.top_issues[0].count : 1;
   const scoreCol = s.avg_score >= 70 ? 'metric-green' : s.avg_score >= 40 ? 'metric-yellow' : 'metric-red';
 
@@ -763,13 +763,15 @@ window.renderResults = function renderResults(data) {
 
   data.products.forEach((p, idx) => {
     const sc = scoreClass(p.score);
-    const passCount = p.present.length;
-    const failCount = p.missing.length;
+    const present = p.present || [];
+    const missing = p.missing || [];
+    const passCount = present.length;
+    const failCount = missing.length;
     const sanitize = s => (s||'').replace(/\n|\r/g,' ').replace(/&[a-z]+;/g,'').slice(0,200);
     const en = sanitize(p.name).slice(0,60);
     const eb = sanitize(p.brand).slice(0,40);
-    const ed = sanitize(p.description);
-    const ml = p.missing.map(f => f.label.replace(/['"`]/g,'')).join('|');
+    const ed = sanitize(p.description || '');
+    const ml = missing.map(f => (f.label || f).replace(/['"`]/g,'')).join('|');
 
     html += `<tr class="product-row" onclick="toggleRow(${idx})">
       <td>
@@ -782,12 +784,14 @@ window.renderResults = function renderResults(data) {
     <tr class="detail-row" id="detail-${idx}">
       <td colspan="3" class="detail-cell">
         <div class="chips">`;
-    for (const f of p.present) {
-      html += `<span class="chip chip-ok">${escapeHtml(f)}</span>`;
+    for (const f of present) {
+      const label = typeof f === 'string' ? f : (f.label || '');
+      html += `<span class="chip chip-ok">${escapeHtml(label)}</span>`;
     }
-    for (const f of p.missing) {
-      const hint = FIX_HINTS[f.label] || 'Add this field to improve AI discoverability';
-      html += `<span class="chip chip-miss" title="${escapeHtml(hint)}">${escapeHtml(f.label)} - missing</span>`;
+    for (const f of missing) {
+      const flabel = typeof f === 'string' ? f : (f.label || '');
+      const hint = FIX_HINTS[flabel] || 'Add this field to improve AI discoverability';
+      html += `<span class="chip chip-miss" title="${escapeHtml(hint)}">${escapeHtml(flabel)} - missing</span>`;
     }
     const pid = p.product_id || '';
     const pvendor = (p.vendor||'').split("'").join("");
@@ -819,12 +823,12 @@ window.renderResults = function renderResults(data) {
   </div>`;
 
   results.innerHTML = html;
-}
-window.renderResults = renderResults;
+};
 
 function toggleRow(idx) {
   const row = document.getElementById('detail-' + idx);
   const productRows = document.querySelectorAll('.product-row');
+  if (!row || !productRows[idx]) return;
   if (row.classList.contains('visible')) {
     row.classList.remove('visible');
     productRows[idx].classList.remove('expanded');
@@ -833,6 +837,7 @@ function toggleRow(idx) {
     productRows[idx].classList.add('expanded');
   }
 }
+window.toggleRow = toggleRow;
 
 function shareScore(score, store) {
   const text = `My Shopify store scored ${score}/100 on AI Readiness - meaning AI engines like ChatGPT and Perplexity may not be recommending my products. Check your store free: https://aiready-checker.onrender.com`;
@@ -843,7 +848,7 @@ function shareScore(score, store) {
   });
 }
 
-async function analyzeContent(btn, name, brand, description) {
+window.analyzeContent = async function analyzeContent(btn, name, brand, description) {
   const cell = btn.closest('.detail-cell');
   const resultBox = cell.querySelector('.analyze-result');
   btn.disabled = true;
@@ -892,7 +897,7 @@ async function analyzeContent(btn, name, brand, description) {
   btn.textContent = 'Analyze Content';
 }
 
-async function generateDesc(btn, name, brand, description, missingLabels) {
+window.generateDesc = async function generateDesc(btn, name, brand, description, missingLabels) {
   const cell = btn.closest('.detail-cell');
   const resultBox = cell.querySelector('.generate-result');
   btn.disabled = true;
@@ -1242,6 +1247,22 @@ if (document.readyState === 'loading') {
 function scanEsc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+function scanJsArg(v) {
+  return scanEsc(JSON.stringify(v == null ? '' : v));
+}
+function toggleRow(idx) {
+  var row = document.getElementById('detail-' + idx);
+  var productRows = document.querySelectorAll('.product-row');
+  if (!row || !productRows[idx]) return;
+  if (row.classList.contains('visible')) {
+    row.classList.remove('visible');
+    productRows[idx].classList.remove('expanded');
+  } else {
+    row.classList.add('visible');
+    productRows[idx].classList.add('expanded');
+  }
+}
+window.toggleRow = toggleRow;
 function renderBasicResults(data) {
   var results = document.getElementById('results');
   if (!results || !data || !data.summary) return;
@@ -1269,14 +1290,36 @@ function renderBasicResults(data) {
     '<table class="product-table"><thead><tr><th>Product</th><th>Score</th><th>Fields</th></tr></thead><tbody>';
   for (i = 0; i < products.length; i++) {
     p = products[i];
+    var present = p.present || [];
+    var missing = p.missing || [];
+    var sanitize = function(s) { return String(s || '').replace(/\n|\r/g, ' ').slice(0, 200); };
+    var en = sanitize(p.name).slice(0, 60);
+    var eb = sanitize(p.brand).slice(0, 40);
+    var ed = sanitize(p.description || '');
+    var ml = missing.map(function(f) { return (f.label || f || '').replace(/['"`]/g, ''); }).join('|');
     sc = p.score >= 70 ? 'score-high' : (p.score >= 40 ? 'score-mid' : 'score-low');
-    passCount = (p.present || []).length;
-    failCount = (p.missing || []).length;
-    html += '<tr class="product-row"><td><div class="product-name-cell">' + scanEsc(p.name) + '</div>' +
-      '<div class="product-url-cell">' + scanEsc(p.url) + '</div></td>' +
+    passCount = present.length;
+    failCount = missing.length;
+    html += '<tr class="product-row" onclick="toggleRow(' + i + ')"><td><div class="product-name-cell">' + scanEsc(p.name) +
+      '<span class="expand-icon">&#9654;</span></div><div class="product-url-cell">' + scanEsc(p.url) + '</div></td>' +
       '<td><span class="score-pill ' + sc + '">' + p.score + '/100</span></td>' +
       '<td><span style="color:var(--green);font-size:13px;font-weight:500;">' + passCount + ' passed</span> &nbsp; ' +
-      '<span style="color:var(--red);font-size:13px;">' + failCount + ' missing</span></td></tr>';
+      '<span style="color:var(--red);font-size:13px;">' + failCount + ' missing</span></td></tr>' +
+      '<tr class="detail-row" id="detail-' + i + '"><td colspan="3" class="detail-cell"><div class="chips">';
+    var j, f, flabel;
+    for (j = 0; j < present.length; j++) {
+      flabel = typeof present[j] === 'string' ? present[j] : (present[j].label || '');
+      html += '<span class="chip chip-ok">' + scanEsc(flabel) + '</span>';
+    }
+    for (j = 0; j < missing.length; j++) {
+      flabel = typeof missing[j] === 'string' ? missing[j] : (missing[j].label || '');
+      html += '<span class="chip chip-miss">' + scanEsc(flabel) + ' - missing</span>';
+    }
+    html += '</div><div class="detail-actions">' +
+      '<button type="button" class="btn-secondary" onclick="event.stopPropagation();(window.analyzeContent||function(){alert(\'Loading… refresh page\');})(this,' + scanJsArg(en) + ',' + scanJsArg(eb) + ',' + scanJsArg(ed) + ')">Analyze Content</button>' +
+      '<button type="button" class="btn-primary" onclick="event.stopPropagation();(window.generateDesc||function(){alert(\'Loading… refresh page\');})(this,' + scanJsArg(en) + ',' + scanJsArg(eb) + ',' + scanJsArg(ed) + ',' + scanJsArg(ml) + ')">Generate AI Description</button>' +
+      '</div><div class="analyze-result" style="display:none;margin-top:12px;"></div>' +
+      '<div class="generate-result" style="display:none;margin-top:12px;"></div></td></tr>';
   }
   html += '</tbody></table></div>';
   results.innerHTML = html;
