@@ -26,27 +26,6 @@ USE_POSTGRES = bool(DATABASE_URL)
 
 FREE_LIMIT = 5  # free AI actions per shop
 
-# #region agent log
-_AGENT_DEBUG_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'debug-612301.log')
-
-def _agent_debug_log(hypothesis_id, location, message, data=None, run_id='pre-fix'):
-    import time
-    try:
-        entry = {
-            'sessionId': '612301',
-            'hypothesisId': hypothesis_id,
-            'location': location,
-            'message': message,
-            'data': data or {},
-            'timestamp': int(time.time() * 1000),
-            'runId': run_id,
-        }
-        with open(_AGENT_DEBUG_LOG, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(entry) + '\n')
-    except Exception:
-        pass
-# #endregion
-
 def db_connect():
     if USE_POSTGRES:
         import psycopg2
@@ -453,8 +432,8 @@ HTML_TEMPLATE = """
   </div>
 
   <div class="scan-card">
-    <form class="scan-row" id="scanForm" onsubmit="event.preventDefault(); runScan(); return false;">
-      <input type="text" class="scan-input" id="storeUrl" name="url" placeholder="yourstore.myshopify.com or yourstore.com" />
+    <form class="scan-row" id="scanForm">
+      <input type="text" class="scan-input" id="storeUrl" name="url" placeholder="yourstore.myshopify.com or yourstore.com" value="{{ prefill_url or '' }}" />
       <button type="submit" class="btn-primary" id="scanBtn">Scan Store</button>
     </form>
   </div>
@@ -463,6 +442,85 @@ HTML_TEMPLATE = """
   <div id="results"></div>
 
 </div><!-- end .page -->
+
+<script>
+/* Scan bootstrap — loads before paywall/main scripts so Scan always works */
+function scanEsc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+async function runScan() {
+  var input = document.getElementById('storeUrl');
+  var url = input ? input.value.trim() : '';
+  if (!url) {
+    alert('Please enter a store URL (e.g. gymshark.com or yourstore.myshopify.com).');
+    if (input) { input.focus(); input.style.borderColor = '#D72C0D'; }
+    return;
+  }
+  if (input) input.style.borderColor = '';
+  try { history.replaceState(null, '', '/app?url=' + encodeURIComponent(url)); } catch (e) {}
+  var btn = document.getElementById('scanBtn');
+  var results = document.getElementById('results');
+  if (!btn || !results) return;
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
+  results.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Scanning up to 20 products — this may take 20–30 seconds...</p></div>';
+  try {
+    var ctrl = new AbortController();
+    var timer = setTimeout(function() { ctrl.abort(); }, 90000);
+    var res = await fetch('/scan', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url: url}),
+      signal: ctrl.signal
+    });
+    clearTimeout(timer);
+    var data;
+    try { data = await res.json(); } catch (e) { data = {error: 'Server error (' + res.status + '). Try gymshark.com or retry.'}; }
+    if (!res.ok && !data.error) data.error = 'Scan failed (' + res.status + '). Try gymshark.com or wait and retry.';
+    if (data.error) {
+      results.innerHTML = '<div class="error-banner">Error: ' + scanEsc(data.error) + '</div>';
+    } else if (typeof renderResults === 'function') {
+      renderResults(data);
+    } else {
+      results.innerHTML = '<div class="error-banner">Scan complete but UI failed to load. Please refresh the page.</div>';
+    }
+  } catch (e) {
+    var msg = (e && e.name === 'AbortError') ? 'Scan timed out (90s). Try a smaller store or retry.' : 'Could not connect to scanner. Check the URL and try again.';
+    results.innerHTML = '<div class="error-banner">' + scanEsc(msg) + '</div>';
+  }
+  btn.disabled = false;
+  btn.textContent = 'Scan Store';
+}
+window.runScan = runScan;
+function initScanApp() {
+  var params = new URLSearchParams(window.location.search);
+  var urlParam = params.get('url');
+  var shop = params.get('shop');
+  var storeInput = document.getElementById('storeUrl');
+  if (shop && storeInput) {
+    var banner = document.getElementById('shopBanner');
+    var label = document.getElementById('shopLabel');
+    if (banner) banner.classList.add('visible');
+    if (label) label.textContent = shop;
+    storeInput.value = shop;
+  } else if (urlParam && storeInput) {
+    storeInput.value = urlParam;
+  }
+  var path = window.location.pathname;
+  if (path === '/upgrade' || params.get('upgrade') === '1') return;
+  if (params.get('paypal') === 'return' || params.get('unlocked') === '1') return;
+  if (urlParam) runScan();
+}
+document.getElementById('scanForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  runScan();
+});
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initScanApp);
+} else {
+  initScanApp();
+}
+</script>
 
 <!-- UPGRADE MODAL -->
 <div class="modal-overlay{% if open_upgrade %} visible{% endif %}" id="upgradeModal">
@@ -636,19 +694,6 @@ if (document.readyState === 'loading') {
 </script>
 
 <script>
-// #region agent log
-function _agentDbg(hypothesisId, location, message, data) {
-  fetch('/api/debug-log', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json', 'X-Debug-Session-Id': '612301'},
-    body: JSON.stringify({sessionId: '612301', hypothesisId: hypothesisId, location: location, message: message, data: data || {}, timestamp: Date.now(), runId: 'pre-fix'})
-  }).catch(function() {});
-}
-window.addEventListener('error', function(ev) {
-  _agentDbg('E', 'window.error', String(ev.message || 'error'), {file: ev.filename, line: ev.lineno, col: ev.colno});
-});
-// #endregion
-
 function runShopScan() {
   runScan();
 }
@@ -667,66 +712,6 @@ const FIX_HINTS = {
 };
 
 let lastData = null;
-
-async function runScan() {
-  const input = document.getElementById('storeUrl');
-  const url = input ? input.value.trim() : '';
-  // #region agent log
-  _agentDbg('C', 'runScan:entry', 'runScan called', {url: url, hasInput: !!input, search: window.location.search});
-  // #endregion
-  if (!url) {
-    // #region agent log
-    _agentDbg('D', 'runScan:empty', 'empty url early return', {});
-    // #endregion
-    alert('Please enter a store URL (e.g. gymshark.com or yourstore.myshopify.com).');
-    if (input) { input.focus(); input.style.borderColor = '#D72C0D'; }
-    return;
-  }
-  if (input) input.style.borderColor = '';
-  try {
-    history.replaceState(null, '', '/app?url=' + encodeURIComponent(url));
-  } catch (e) {}
-  const btn = document.getElementById('scanBtn');
-  const results = document.getElementById('results');
-  if (!btn || !results) {
-    // #region agent log
-    _agentDbg('C', 'runScan:noDom', 'missing btn or results', {hasBtn: !!btn, hasResults: !!results});
-    // #endregion
-    return;
-  }
-  btn.disabled = true;
-  btn.textContent = 'Scanning...';
-  results.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Scanning up to 20 products - this may take 20-30 seconds...</p></div>';
-  // #region agent log
-  _agentDbg('D', 'runScan:fetch', 'starting fetch /scan', {url: url});
-  // #endregion
-  try {
-    const res = await fetch('/scan', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({url})
-    });
-    let data;
-    try { data = await res.json(); } catch (parseErr) { data = { error: 'Server error (' + res.status + '). Try again or use a smaller store.' }; }
-    // #region agent log
-    _agentDbg('D', 'runScan:response', 'fetch done', {status: res.status, hasError: !!(data && data.error), productCount: data && data.products ? data.products.length : 0});
-    // #endregion
-    if (!res.ok && !data.error) data.error = 'Scan failed (' + res.status + '). Try gymshark.com or wait and retry.';
-    if (data.error) {
-      results.innerHTML = `<div class="error-banner">Error: ${escapeHtml(data.error)}</div>`;
-    } else {
-      lastData = data;
-      renderResults(data);
-    }
-  } catch(e) {
-    // #region agent log
-    _agentDbg('D', 'runScan:catch', 'fetch exception', {err: String(e)});
-    // #endregion
-    results.innerHTML = '<div class="error-banner">Could not connect to scanner. Make sure the store URL is correct.</div>';
-  }
-  btn.disabled = false;
-  btn.textContent = 'Scan Store';
-}
 
 function scoreClass(s) {
   if (s >= 70) return 'score-high';
@@ -752,6 +737,7 @@ function toggleFix(el) {
 }
 
 function renderResults(data) {
+  lastData = data;
   const results = document.getElementById('results');
   const s = data.summary;
   const totalIssues = data.products.reduce((a,p) => a + p.missing.length, 0);
@@ -1289,23 +1275,10 @@ function downloadPDF() {
   doc.save('aiready-report-' + s.store + '-' + date.split('/').join('-') + '.pdf');
 }
 
-function initApp() {
+function initPaywallApp() {
   var params = new URLSearchParams(window.location.search);
-  var urlParam = params.get('url');
   var shop = params.get('shop');
   var storeInput = document.getElementById('storeUrl');
-  // #region agent log
-  _agentDbg('B', 'initApp:entry', 'initApp', {urlParam: urlParam, shop: shop, path: window.location.pathname, upgrade: params.get('upgrade'), readyState: document.readyState});
-  // #endregion
-  if (shop && storeInput) {
-    var banner = document.getElementById('shopBanner');
-    var label = document.getElementById('shopLabel');
-    if (banner) banner.classList.add('visible');
-    if (label) label.textContent = shop;
-    storeInput.value = shop;
-  } else if (urlParam && storeInput) {
-    storeInput.value = urlParam;
-  }
   var path = window.location.pathname;
   var isPaywall = path === '/upgrade' || params.get('upgrade') === '1';
   if (params.get('paypal') === 'return') {
@@ -1331,35 +1304,13 @@ function initApp() {
     return;
   }
   if (isPaywall) {
-    // #region agent log
-    _agentDbg('B', 'initApp:paywall', 'early return paywall', {isPaywall: true});
-    // #endregion
     showUpgradeModal(shop || (storeInput && storeInput.value.trim()) || '');
-    return;
-  }
-  if (urlParam) {
-    // #region agent log
-    _agentDbg('B', 'initApp:autoScan', 'calling runScan from urlParam', {urlParam: urlParam});
-    // #endregion
-    runScan();
   }
 }
-(function bindScanFormDebug() {
-  function bind() {
-    var f = document.getElementById('scanForm');
-    if (f) f.addEventListener('submit', function() {
-      // #region agent log
-      _agentDbg('C', 'scanForm:submit', 'scan form submitted', {url: (document.getElementById('storeUrl') || {}).value});
-      // #endregion
-    });
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
-  else bind();
-})();
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initApp);
+  document.addEventListener('DOMContentLoaded', initPaywallApp);
 } else {
-  initApp();
+  initPaywallApp();
 }
 </script>
 
@@ -1793,7 +1744,7 @@ LANDING_TEMPLATE = """
       <span class="en">中文</span>
       <span class="zh">English</span>
     </button>
-    <a href="/app" class="btn-nav">
+    <a href="/#scan-hero" class="btn-nav">
       <span class="en">Free Scan &rarr;</span>
       <span class="zh">免费扫描 &rarr;</span>
     </a>
@@ -1801,7 +1752,7 @@ LANDING_TEMPLATE = """
 </nav>
 
 <!-- HERO -->
-<section class="hero">
+<section class="hero" id="scan-hero">
   <div class="hero-badge en">Free GEO Scanner for Shopify Stores</div>
   <div class="hero-badge zh">免费 GEO 检测工具 &mdash; 专为 Shopify 出海商家</div>
   <h1 class="en">Is your store <em>invisible</em><br/>to ChatGPT?</h1>
@@ -2045,7 +1996,7 @@ LANDING_TEMPLATE = """
         <li class="en">5 free AI fixes</li><li class="zh">5 次免费 AI 修复</li>
         <li class="en">PDF report download</li><li class="zh">PDF 报告下载</li>
       </ul>
-      <a href="/app" class="btn-price btn-price-free">
+      <a href="/#scan-hero" class="btn-price btn-price-free">
         <span class="en">Start Free Scan</span>
         <span class="zh">开始免费扫描</span>
       </a>
@@ -2133,7 +2084,7 @@ LANDING_TEMPLATE = """
   <h2 class="zh">30 秒获取你的免费 GEO 评分</h2>
   <p class="en">Free scan, no account needed.</p>
   <p class="zh">免费扫描，无需注册。</p>
-  <a href="/app" class="btn-nav" style="font-size:16px;padding:14px 36px;display:inline-block;">
+  <a href="/#scan-hero" class="btn-nav" style="font-size:16px;padding:14px 36px;display:inline-block;">
     <span class="en">Scan My Store Free &rarr;</span>
     <span class="zh">免费扫描我的店铺 &rarr;</span>
   </a>
@@ -2150,14 +2101,6 @@ LANDING_TEMPLATE = """
 </footer>
 
 <script>
-function goScan() {
-  var url = document.getElementById('heroUrl').value.trim();
-  if (url) { window.location.href = '/app?url=' + encodeURIComponent(url); }
-  else { window.location.href = '/app'; }
-}
-document.getElementById('heroUrl').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') goScan();
-});
 function toggleLang() {
   document.body.classList.toggle('lang-zh');
 }
@@ -2324,21 +2267,6 @@ def privacy():
 def terms():
     return render_template_string(TERMS_TEMPLATE)
 
-@app.route('/api/debug-log', methods=['POST'])
-def api_debug_log():
-    # #region agent log
-    payload = request.get_json() or {}
-    _agent_debug_log(
-        payload.get('hypothesisId', '?'),
-        payload.get('location', 'client'),
-        payload.get('message', ''),
-        payload.get('data'),
-        payload.get('runId', 'pre-fix'),
-    )
-    # #endregion
-    return jsonify({'ok': True})
-
-
 @app.route('/')
 def index():
     return render_template_string(LANDING_TEMPLATE)
@@ -2365,14 +2293,6 @@ def app_page():
     url_param = request.args.get('url', '')
     open_upgrade = request.args.get('upgrade') == '1'
     shop_prefill = request.args.get('shop', '').strip().lower()
-    # #region agent log
-    _agent_debug_log('A', 'app_page', 'GET /app', {
-        'url_param': url_param[:80] if url_param else '',
-        'open_upgrade': open_upgrade,
-        'shop_prefill': shop_prefill[:80] if shop_prefill else '',
-        'query': dict(request.args),
-    })
-    # #endregion
     return _render_app_page(
         open_upgrade=open_upgrade,
         shop_prefill=shop_prefill,
@@ -2383,9 +2303,6 @@ def app_page():
 def scan():
     data = request.get_json() or {}
     store_url = data.get('url', '').strip()
-    # #region agent log
-    _agent_debug_log('D', 'scan', 'POST /scan', {'store_url': store_url[:80] if store_url else '', 'has_json': bool(data)})
-    # #endregion
     if not store_url:
         return jsonify({'error': 'Please provide a store URL.'})
     product_urls, shopify_products = get_product_urls(store_url)
