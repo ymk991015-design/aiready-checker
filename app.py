@@ -403,8 +403,7 @@ HTML_TEMPLATE = """
     .pay-store-row { text-align:left; margin-bottom:14px; }
     .success-banner { background:var(--green-bg); border:1px solid var(--green-border); color:#005E45; padding:14px 18px; border-radius:8px; margin-bottom:16px; font-size:14px; text-align:center; }
     body.paywall-open { overflow: hidden; }
-    body.paywall-open .page { filter: blur(2px); pointer-events: none; user-select: none; }
-    body.paywall-open .topbar { filter: blur(2px); pointer-events: none; }
+    body.paywall-open:has(#upgradeModal.visible) .page { filter: blur(2px); }
 
     @media(max-width: 640px) {
       .metrics { grid-template-columns: 1fr; }
@@ -413,7 +412,7 @@ HTML_TEMPLATE = """
     }
   </style>
 </head>
-<body{% if open_upgrade %} class="paywall-open"{% endif %}>
+<body>
 
 <div class="topbar">
   <a href="/" style="text-decoration:none;"><div class="topbar-logo">Ai<span>Ready</span></div></a>
@@ -481,10 +480,16 @@ const FIX_HINTS = {
 let lastData = null;
 
 async function runScan() {
-  const url = document.getElementById('storeUrl').value.trim();
-  if (!url) return;
+  const input = document.getElementById('storeUrl');
+  const url = input ? input.value.trim() : '';
+  if (!url) {
+    alert('Please enter a store URL (e.g. gymshark.com or yourstore.myshopify.com).');
+    if (input) { input.focus(); input.style.borderColor = '#D72C0D'; }
+    return;
+  }
   const btn = document.getElementById('scanBtn');
   const results = document.getElementById('results');
+  if (!btn || !results) return;
   btn.disabled = true;
   btn.textContent = 'Scanning...';
   results.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Scanning up to 20 products - this may take 20-30 seconds...</p></div>';
@@ -494,7 +499,9 @@ async function runScan() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({url})
     });
-    const data = await res.json();
+    let data;
+    try { data = await res.json(); } catch (parseErr) { data = { error: 'Server error (' + res.status + '). Try again or use a smaller store.' }; }
+    if (!res.ok && !data.error) data.error = 'Scan failed (' + res.status + '). Try gymshark.com or wait and retry.';
     if (data.error) {
       results.innerHTML = `<div class="error-banner">Error: ${escapeHtml(data.error)}</div>`;
     } else {
@@ -988,7 +995,7 @@ function closeUpgradeModal() {
   var modal = document.getElementById('upgradeModal');
   if (modal) modal.classList.remove('visible');
   document.body.classList.remove('paywall-open');
-  if (window.location.pathname === '/upgrade' || new URLSearchParams(window.location.search).get('upgrade') === '1') {
+  if (window.location.pathname === '/upgrade') {
     window.location.href = '/app';
   }
 }
@@ -1266,13 +1273,15 @@ def get_product_urls(store_url):
         'Accept-Language': 'en-US,en;q=0.5',
     }
     urls = []
+    products = []
 
     # Method 1: products.json (most reliable)
     try:
         r = requests.get(f"{base}/products.json?limit=20", headers=headers, timeout=12)
         if r.status_code == 200:
             data = r.json()
-            for p in data.get('products', []):
+            products = data.get('products', [])
+            for p in products:
                 handle = p.get('handle', '')
                 if handle:
                     urls.append(f"{base}/products/{handle}")
@@ -1328,7 +1337,45 @@ def get_product_urls(store_url):
         except Exception:
             pass
 
-    return urls[:20]
+    return urls[:20], products[:20]
+
+
+def schema_from_shopify_product(data):
+    """Build schema dict from Shopify products.json entry (no extra HTTP)."""
+    if not data:
+        return None
+    variants = data.get('variants', [])
+    options = {o['name'].lower(): o.get('values', []) for o in data.get('options', [])}
+    images = data.get('images', [])
+    schema = {
+        '@type': 'Product',
+        '_shopify_id': str(data.get('id', '')),
+        'name': data.get('title', ''),
+        'description': data.get('body_html', ''),
+        'image': images[0].get('src') if images else None,
+        'brand': data.get('vendor', ''),
+        'sku': variants[0].get('sku', '') if variants else '',
+        'offers': {
+            'price': variants[0].get('price') if variants else None,
+            'availability': 'InStock' if any(v.get('available') for v in variants) else 'OutOfStock',
+        } if variants else None,
+    }
+    for opt_name, values in options.items():
+        if values:
+            if 'color' in opt_name or 'colour' in opt_name:
+                schema['color'] = values[0]
+            elif 'size' in opt_name:
+                schema['size'] = values[0]
+            elif 'material' in opt_name or 'fabric' in opt_name:
+                schema['material'] = values[0]
+    for v in variants:
+        if not schema.get('gtin') and v.get('barcode'):
+            schema['gtin'] = v['barcode']
+        if not schema.get('mpn') and v.get('sku'):
+            schema['mpn'] = v['sku']
+        if schema.get('gtin') and schema.get('mpn'):
+            break
+    return schema
 
 def has_value(value):
     if value is None:
@@ -2051,11 +2098,18 @@ def scan():
     store_url = data.get('url', '').strip()
     if not store_url:
         return jsonify({'error': 'Please provide a store URL.'})
-    product_urls = get_product_urls(store_url)
+    product_urls, shopify_products = get_product_urls(store_url)
     if not product_urls:
         return jsonify({'error': 'Could not find products. Make sure the store URL is correct and the store is live.'})
+    product_by_handle = {p.get('handle', ''): p for p in shopify_products if p.get('handle')}
+
     def scan_one(url):
-        schema = extract_schema(url)
+        handle = url.rstrip('/').split('/products/')[-1].split('?')[0]
+        schema = None
+        if handle and handle in product_by_handle:
+            schema = schema_from_shopify_product(product_by_handle[handle])
+        if not schema:
+            schema = extract_schema(url)
         if not schema:
             return None
         score, present, missing = score_product(schema)
@@ -2071,8 +2125,11 @@ def scan():
             'product_id': schema.get('_shopify_id', ''),
             'vendor': schema.get('brand', ''),
         }
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        raw = list(executor.map(scan_one, product_urls))
+    if product_by_handle:
+        raw = [scan_one(u) for u in product_urls]
+    else:
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            raw = list(executor.map(scan_one, product_urls))
     results = [r for r in raw if r is not None]
     if not results:
         return jsonify({'error': 'Could not extract schema from product pages. The store may require JavaScript rendering.'})
@@ -2126,7 +2183,7 @@ def paypal_register_intent():
     if not shop or not is_valid_shop(shop):
         return jsonify({'error': 'Invalid store URL. Use your myshopify.com domain.'}), 400
     db_execute('INSERT INTO paypal_intents (shop) VALUES (?)', (shop,))
-    return jsonify({'success': True, 'paypal_url': PAYPAL_URL})
+    return jsonify({'success': True})
 
 
 @app.route('/paypal/return')
