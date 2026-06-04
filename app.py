@@ -641,7 +641,7 @@ function scoreClass(s) {
 }
 
 function escapeHtml(value) {
-  return String(value ?? '')
+  return String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -650,15 +650,16 @@ function escapeHtml(value) {
 }
 
 function jsArg(value) {
-  return escapeHtml(JSON.stringify(value ?? ''));
+  return escapeHtml(JSON.stringify(value == null ? '' : value));
 }
 
 function toggleFix(el) {
   el.classList.toggle('expanded');
 }
 
-function renderResults(data) {
+window.renderResults = function renderResults(data) {
   lastData = data;
+  window.lastData = data;
   const results = document.getElementById('results');
   const s = data.summary;
   const totalIssues = data.products.reduce((a,p) => a + p.missing.length, 0);
@@ -1241,27 +1242,65 @@ if (document.readyState === 'loading') {
 function scanEsc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-function showScanResults(data) {
+function renderBasicResults(data) {
   var results = document.getElementById('results');
+  if (!results || !data || !data.summary) return;
+  window.lastData = data;
+  var s = data.summary;
+  var products = data.products || [];
+  var totalIssues = 0;
+  var i, p, sc, passCount, failCount;
+  for (i = 0; i < products.length; i++) totalIssues += (products[i].missing || []).length;
+  var scoreCol = s.avg_score >= 70 ? 'metric-green' : (s.avg_score >= 40 ? 'metric-yellow' : 'metric-red');
+  var html = '<div class="metrics">' +
+    '<div class="metric-card"><div class="metric-value">' + s.total_products + '</div><div class="metric-label">Products scanned</div></div>' +
+    '<div class="metric-card"><div class="metric-value ' + scoreCol + '">' + s.avg_score + '<span style="font-size:16px;font-weight:400;color:var(--text-sub)">/100</span></div><div class="metric-label">Average AI Readiness Score</div></div>' +
+    '<div class="metric-card"><div class="metric-value metric-red">' + totalIssues + '</div><div class="metric-label">Total missing fields</div></div></div>';
+  if (s.top_issues && s.top_issues.length) {
+    html += '<div class="card"><div class="card-header"><div class="card-title">Most common issues</div></div><div class="card-body">';
+    for (i = 0; i < s.top_issues.length; i++) {
+      var issue = s.top_issues[i];
+      html += '<div class="issue-row"><span class="issue-name">' + scanEsc(issue.field) + '</span>' +
+        '<span class="issue-count">' + issue.count + ' of ' + s.total_products + ' products</span></div>';
+    }
+    html += '</div></div>';
+  }
+  html += '<div class="card"><div class="card-header"><div class="card-title">Product breakdown</div></div>' +
+    '<table class="product-table"><thead><tr><th>Product</th><th>Score</th><th>Fields</th></tr></thead><tbody>';
+  for (i = 0; i < products.length; i++) {
+    p = products[i];
+    sc = p.score >= 70 ? 'score-high' : (p.score >= 40 ? 'score-mid' : 'score-low');
+    passCount = (p.present || []).length;
+    failCount = (p.missing || []).length;
+    html += '<tr class="product-row"><td><div class="product-name-cell">' + scanEsc(p.name) + '</div>' +
+      '<div class="product-url-cell">' + scanEsc(p.url) + '</div></td>' +
+      '<td><span class="score-pill ' + sc + '">' + p.score + '/100</span></td>' +
+      '<td><span style="color:var(--green);font-size:13px;font-weight:500;">' + passCount + ' passed</span> &nbsp; ' +
+      '<span style="color:var(--red);font-size:13px;">' + failCount + ' missing</span></td></tr>';
+  }
+  html += '</tbody></table></div>';
+  results.innerHTML = html;
+}
+function showScanResults(data) {
   if (typeof window.renderResults === 'function') {
     try {
       window.renderResults(data);
+      return;
     } catch (err) {
-      if (results) results.innerHTML = '<div class="error-banner">Error displaying results: ' + scanEsc(String(err)) + '</div>';
+      console.error('renderResults error', err);
     }
-    return;
   }
+  renderBasicResults(data);
   var tries = 0;
   var iv = setInterval(function() {
     tries++;
     if (typeof window.renderResults === 'function') {
       clearInterval(iv);
-      window.renderResults(data);
-    } else if (tries > 80) {
+      try { window.renderResults(data); } catch (e) { /* keep basic view */ }
+    } else if (tries > 30) {
       clearInterval(iv);
-      if (results) results.innerHTML = '<div class="error-banner">Scan complete but UI failed to load. Please refresh the page.</div>';
     }
-  }, 50);
+  }, 100);
 }
 async function runScan() {
   var input = document.getElementById('storeUrl');
