@@ -443,85 +443,6 @@ HTML_TEMPLATE = """
 
 </div><!-- end .page -->
 
-<script>
-/* Scan bootstrap — loads before paywall/main scripts so Scan always works */
-function scanEsc(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-async function runScan() {
-  var input = document.getElementById('storeUrl');
-  var url = input ? input.value.trim() : '';
-  if (!url) {
-    alert('Please enter a store URL (e.g. gymshark.com or yourstore.myshopify.com).');
-    if (input) { input.focus(); input.style.borderColor = '#D72C0D'; }
-    return;
-  }
-  if (input) input.style.borderColor = '';
-  try { history.replaceState(null, '', '/app?url=' + encodeURIComponent(url)); } catch (e) {}
-  var btn = document.getElementById('scanBtn');
-  var results = document.getElementById('results');
-  if (!btn || !results) return;
-  btn.disabled = true;
-  btn.textContent = 'Scanning...';
-  results.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Scanning up to 20 products — this may take 20–30 seconds...</p></div>';
-  try {
-    var ctrl = new AbortController();
-    var timer = setTimeout(function() { ctrl.abort(); }, 90000);
-    var res = await fetch('/scan', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({url: url}),
-      signal: ctrl.signal
-    });
-    clearTimeout(timer);
-    var data;
-    try { data = await res.json(); } catch (e) { data = {error: 'Server error (' + res.status + '). Try gymshark.com or retry.'}; }
-    if (!res.ok && !data.error) data.error = 'Scan failed (' + res.status + '). Try gymshark.com or wait and retry.';
-    if (data.error) {
-      results.innerHTML = '<div class="error-banner">Error: ' + scanEsc(data.error) + '</div>';
-    } else if (typeof renderResults === 'function') {
-      renderResults(data);
-    } else {
-      results.innerHTML = '<div class="error-banner">Scan complete but UI failed to load. Please refresh the page.</div>';
-    }
-  } catch (e) {
-    var msg = (e && e.name === 'AbortError') ? 'Scan timed out (90s). Try a smaller store or retry.' : 'Could not connect to scanner. Check the URL and try again.';
-    results.innerHTML = '<div class="error-banner">' + scanEsc(msg) + '</div>';
-  }
-  btn.disabled = false;
-  btn.textContent = 'Scan Store';
-}
-window.runScan = runScan;
-function initScanApp() {
-  var params = new URLSearchParams(window.location.search);
-  var urlParam = params.get('url');
-  var shop = params.get('shop');
-  var storeInput = document.getElementById('storeUrl');
-  if (shop && storeInput) {
-    var banner = document.getElementById('shopBanner');
-    var label = document.getElementById('shopLabel');
-    if (banner) banner.classList.add('visible');
-    if (label) label.textContent = shop;
-    storeInput.value = shop;
-  } else if (urlParam && storeInput) {
-    storeInput.value = urlParam;
-  }
-  var path = window.location.pathname;
-  if (path === '/upgrade' || params.get('upgrade') === '1') return;
-  if (params.get('paypal') === 'return' || params.get('unlocked') === '1') return;
-  if (urlParam) runScan();
-}
-document.getElementById('scanForm').addEventListener('submit', function(e) {
-  e.preventDefault();
-  runScan();
-});
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initScanApp);
-} else {
-  initScanApp();
-}
-</script>
-
 <!-- UPGRADE MODAL -->
 <div class="modal-overlay{% if open_upgrade %} visible{% endif %}" id="upgradeModal">
   <div class="modal-box">
@@ -898,6 +819,7 @@ function renderResults(data) {
 
   results.innerHTML = html;
 }
+window.renderResults = renderResults;
 
 function toggleRow(idx) {
   const row = document.getElementById('detail-' + idx);
@@ -1312,6 +1234,109 @@ if (document.readyState === 'loading') {
 } else {
   initPaywallApp();
 }
+</script>
+
+<script>
+/* Scan runner — must load after renderResults (main script above) */
+function scanEsc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function showScanResults(data) {
+  var results = document.getElementById('results');
+  if (typeof window.renderResults === 'function') {
+    try {
+      window.renderResults(data);
+    } catch (err) {
+      if (results) results.innerHTML = '<div class="error-banner">Error displaying results: ' + scanEsc(String(err)) + '</div>';
+    }
+    return;
+  }
+  var tries = 0;
+  var iv = setInterval(function() {
+    tries++;
+    if (typeof window.renderResults === 'function') {
+      clearInterval(iv);
+      window.renderResults(data);
+    } else if (tries > 80) {
+      clearInterval(iv);
+      if (results) results.innerHTML = '<div class="error-banner">Scan complete but UI failed to load. Please refresh the page.</div>';
+    }
+  }, 50);
+}
+async function runScan() {
+  var input = document.getElementById('storeUrl');
+  var url = input ? input.value.trim() : '';
+  if (!url) {
+    alert('Please enter a store URL (e.g. gymshark.com or yourstore.myshopify.com).');
+    if (input) { input.focus(); input.style.borderColor = '#D72C0D'; }
+    return;
+  }
+  if (input) input.style.borderColor = '';
+  try { history.replaceState(null, '', '/app?url=' + encodeURIComponent(url)); } catch (e) {}
+  var btn = document.getElementById('scanBtn');
+  var results = document.getElementById('results');
+  if (!btn || !results) return;
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
+  results.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Scanning up to 20 products — this may take 20–30 seconds...</p></div>';
+  try {
+    var ctrl = new AbortController();
+    var timer = setTimeout(function() { ctrl.abort(); }, 90000);
+    var res = await fetch('/scan', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url: url}),
+      signal: ctrl.signal
+    });
+    clearTimeout(timer);
+    var data;
+    try { data = await res.json(); } catch (e) { data = {error: 'Server error (' + res.status + '). Try gymshark.com or retry.'}; }
+    if (!res.ok && !data.error) data.error = 'Scan failed (' + res.status + '). Try gymshark.com or wait and retry.';
+    if (data.error) {
+      results.innerHTML = '<div class="error-banner">Error: ' + scanEsc(data.error) + '</div>';
+    } else {
+      showScanResults(data);
+    }
+  } catch (e) {
+    var msg = (e && e.name === 'AbortError') ? 'Scan timed out (90s). Try a smaller store or retry.' : 'Could not connect to scanner. Check the URL and try again.';
+    results.innerHTML = '<div class="error-banner">' + scanEsc(msg) + '</div>';
+  }
+  btn.disabled = false;
+  btn.textContent = 'Scan Store';
+}
+window.runScan = runScan;
+function initScanApp() {
+  var params = new URLSearchParams(window.location.search);
+  var urlParam = params.get('url');
+  var shop = params.get('shop');
+  var storeInput = document.getElementById('storeUrl');
+  if (shop && storeInput) {
+    var banner = document.getElementById('shopBanner');
+    var label = document.getElementById('shopLabel');
+    if (banner) banner.classList.add('visible');
+    if (label) label.textContent = shop;
+    storeInput.value = shop;
+  } else if (urlParam && storeInput) {
+    storeInput.value = urlParam;
+  }
+}
+function maybeAutoScan() {
+  var params = new URLSearchParams(window.location.search);
+  var urlParam = params.get('url');
+  var path = window.location.pathname;
+  if (path === '/upgrade' || params.get('upgrade') === '1') return;
+  if (params.get('paypal') === 'return' || params.get('unlocked') === '1') return;
+  if (urlParam) runScan();
+}
+var scanForm = document.getElementById('scanForm');
+if (scanForm) {
+  scanForm.addEventListener('submit', function(e) {
+    e.preventDefault();
+    runScan();
+  });
+}
+initScanApp();
+window.addEventListener('load', maybeAutoScan);
 </script>
 
 </body>
