@@ -252,6 +252,12 @@ HTML_TEMPLATE = """
 
     /* PAGE HEADER */
     .page-header { margin-bottom: 20px; }
+    .feature-cards { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:20px; }
+    .fcard { background:#fff; border:1px solid var(--border); border-radius:8px; padding:14px 16px; display:flex; gap:10px; align-items:flex-start; }
+    .fcard-icon { font-size:18px; line-height:1.4; flex-shrink:0; }
+    .fcard-title { font-size:13px; font-weight:600; color:var(--text); margin-bottom:2px; }
+    .fcard-desc { font-size:12px; color:var(--text-sub); line-height:1.5; }
+    @media(max-width:640px) { .feature-cards { grid-template-columns:1fr; } }
     .page-title { font-size: 20px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
     .page-subtitle { font-size: 14px; color: var(--text-sub); }
 
@@ -439,6 +445,11 @@ HTML_TEMPLATE = """
   </div>
 
   <div id="unlimitedBanner" style="display:none;" class="success-banner"></div>
+  <div class="feature-cards" id="featureCards">
+    <div class="fcard"><div class="fcard-icon">&#128202;</div><div><div class="fcard-title">Score every product</div><div class="fcard-desc">13 structured data fields. See what&apos;s missing and the GEO score impact.</div></div></div>
+    <div class="fcard"><div class="fcard-icon">&#129302;</div><div><div class="fcard-title">Generate GEO descriptions</div><div class="fcard-desc">One-click AI copy that ChatGPT, Perplexity &amp; Gemini can understand.</div></div></div>
+    <div class="fcard"><div class="fcard-icon">&#128279;</div><div><div class="fcard-title">Save to Shopify</div><div class="fcard-desc">Connect your store and push fixes without leaving this page.</div></div></div>
+  </div>
   <div id="results"></div>
 
 </div><!-- end .page -->
@@ -658,6 +669,8 @@ function toggleFix(el) {
 }
 
 window.renderResults = function renderResults(data) {
+  var fc = document.getElementById('featureCards');
+  if (fc) fc.style.display = 'none';
   lastData = data;
   window.lastData = data;
   const results = document.getElementById('results');
