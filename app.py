@@ -213,7 +213,7 @@ HTML_TEMPLATE = """
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>AiReady - AI Readiness Checker</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -371,9 +371,9 @@ HTML_TEMPLATE = """
     .usage-badge.paid { background:var(--green-bg); border-color:var(--green-border); color:var(--green); }
 
     /* UPGRADE MODAL */
-    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center; }
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center; padding:20px; }
     .modal-overlay.visible { display:flex; }
-    .modal-box { background:#fff; border-radius:12px; padding:32px; max-width:440px; width:90%; text-align:center; box-shadow:0 8px 40px rgba(0,0,0,0.18); }
+    .modal-box { background:#fff; border-radius:12px; padding:32px; max-width:440px; width:90%; text-align:center; box-shadow:0 8px 40px rgba(0,0,0,0.18); position:relative; z-index:1001; pointer-events:auto; }
     .modal-icon { font-size:36px; margin-bottom:12px; }
     .modal-title { font-size:20px; font-weight:700; color:var(--text); margin-bottom:8px; }
     .modal-sub { font-size:14px; color:var(--text-sub); margin-bottom:24px; line-height:1.6; }
@@ -383,8 +383,8 @@ HTML_TEMPLATE = """
     .modal-rate-note { font-size:12px; color:var(--text-hint); margin-top:-18px; margin-bottom:20px; }
     .modal-features { text-align:left; background:var(--green-bg); border:1px solid var(--green-border); border-radius:8px; padding:14px 18px; margin-bottom:24px; }
     .modal-feature { font-size:13px; color:#005E45; padding:3px 0; }
-    .modal-close { margin-top:14px; font-size:13px; color:var(--text-hint); cursor:pointer; }
-    .modal-close:hover { color:var(--text-sub); }
+    .modal-close { margin-top:14px; font-size:13px; color:var(--text-hint); cursor:pointer; background:none; border:none; font-family:inherit; width:100%; padding:8px; }
+    .modal-close:hover { color:var(--text-sub); text-decoration:underline; }
     .pay-btn { width:100%; padding:14px; font-size:15px; display:block; text-align:center; text-decoration:none; box-sizing:border-box; color:#fff; margin-bottom:12px; border:none; cursor:pointer; font-family:inherit; }
     .paypal-form { margin-bottom:12px; }
     .paypal-form input[type="image"] { width:100%; max-width:240px; height:auto; cursor:pointer; }
@@ -412,7 +412,7 @@ HTML_TEMPLATE = """
     }
   </style>
 </head>
-<body>
+<body{% if open_upgrade %} class="paywall-open"{% endif %}>
 
 <div class="topbar">
   <a href="/" style="text-decoration:none;"><div class="topbar-logo">Ai<span>Ready</span></div></a>
@@ -469,18 +469,150 @@ HTML_TEMPLATE = """
         <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_buynowCC_LG.gif" border="0" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Buy Now" style="width:100%;max-width:240px;height:auto;" />
       </form>
       <div class="pay-amount-hint">Fixed ${{ usd_price }} USD via PayPal. You will return here after payment.</div>
-      <button type="button" class="pay-done-btn" onclick="showPaidStep()">I paid on PayPal &rarr;</button>
+      <button type="button" id="btnPaidStep" class="pay-done-btn">I paid on PayPal &rarr;</button>
     </div>
     <div id="modalStep2" style="display:none;margin-top:16px;">
-      <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Enter the PayPal email you used to pay $9:</p>
+      <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Enter the PayPal email you used to pay ${{ usd_price }}:</p>
       <input type="email" id="unlockEmail" class="scan-input" placeholder="your@paypal.email" style="margin-bottom:8px;" />
-      <button class="btn-primary" style="width:100%;padding:12px;" onclick="submitUnlockRequest()">Confirm payment &amp; unlock</button>
+      <button type="button" id="btnConfirmUnlock" class="btn-primary" style="width:100%;padding:12px;">Confirm payment &amp; unlock</button>
       <div id="unlockMsg" style="margin-top:10px;font-size:13px;display:none;"></div>
     </div>
     <input type="hidden" id="paypalShop" value="{{ shop_prefill or '' }}">
-    <div class="modal-close" onclick="closeUpgradeModal()">Maybe later</div>
+    <button type="button" id="btnMaybeLater" class="modal-close">Maybe later</button>
   </div>
 </div>
+
+<script>
+/* Paywall controls load first so buttons work before the main app script */
+function closeUpgradeModal() {
+  var modal = document.getElementById('upgradeModal');
+  if (modal) modal.classList.remove('visible');
+  document.body.classList.remove('paywall-open');
+  if (window.location.pathname === '/upgrade') {
+    window.location.href = '/app';
+    return;
+  }
+  try {
+    var u = new URL(window.location.href);
+    if (u.searchParams.get('upgrade') === '1') {
+      u.searchParams.delete('upgrade');
+      history.replaceState(null, '', u.pathname + (u.search || ''));
+    }
+  } catch (e) {}
+}
+function showPaidStep() {
+  var s1 = document.getElementById('modalStep1');
+  var s2 = document.getElementById('modalStep2');
+  if (s1) s1.style.display = 'none';
+  if (s2) s2.style.display = 'block';
+  var email = document.getElementById('unlockEmail');
+  if (email) email.focus();
+}
+function showUpgradeModal(shop) {
+  var modal = document.getElementById('upgradeModal');
+  if (!modal) return;
+  var shopInput = document.getElementById('paypalShop');
+  if (shopInput) shopInput.value = shop || '';
+  var storeUrl = document.getElementById('upgradeStoreUrl');
+  if (storeUrl && shop) storeUrl.value = shop;
+  var fromPricing = new URLSearchParams(window.location.search).get('upgrade') === '1'
+    || window.location.pathname === '/upgrade';
+  var title = document.querySelector('#upgradeModal .modal-title');
+  var sub = document.querySelector('#upgradeModal .modal-sub');
+  if (title && sub) {
+    if (fromPricing) {
+      title.textContent = 'Upgrade to Unlimited';
+      sub.textContent = 'One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.';
+    } else {
+      title.textContent = "You've used your 5 free actions";
+      sub.textContent = 'Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.';
+    }
+  }
+  var step1 = document.getElementById('modalStep1');
+  var step2 = document.getElementById('modalStep2');
+  if (step1) step1.style.display = 'block';
+  if (step2) step2.style.display = 'none';
+  modal.classList.add('visible');
+  document.body.classList.add('paywall-open');
+}
+function getPaywallShop() {
+  var el = document.getElementById('upgradeStoreUrl');
+  if (el && el.value.trim()) return el.value.trim();
+  var hidden = document.getElementById('paypalShop');
+  if (hidden && hidden.value.trim()) return hidden.value.trim();
+  var scan = document.getElementById('storeUrl');
+  if (scan && scan.value.trim()) return scan.value.trim();
+  return '';
+}
+async function handlePayPalSubmit(e) {
+  e.preventDefault();
+  const shop = getPaywallShop();
+  if (!shop) {
+    alert('Please enter your store URL first (e.g. yourstore.myshopify.com).');
+    return false;
+  }
+  try {
+    await fetch('/paypal/register-intent', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({shop})
+    });
+  } catch (err) {}
+  document.getElementById('paypalForm').submit();
+  return false;
+}
+async function submitUnlockRequest() {
+  const email = document.getElementById('unlockEmail').value.trim();
+  const shop = getPaywallShop();
+  const msg = document.getElementById('unlockMsg');
+  if (!shop) { alert('Please enter your store URL (e.g. yourstore.myshopify.com).'); return; }
+  if (!email) { alert('Please enter the PayPal email you used to pay.'); return; }
+  const btn = document.getElementById('btnConfirmUnlock');
+  if (btn) { btn.disabled = true; btn.textContent = 'Unlocking...'; }
+  try {
+    const res = await fetch('/request-unlock', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email, shop, method: 'paypal'})
+    });
+    const data = await res.json();
+    if (data.success && data.redirect) {
+      window.location.href = data.redirect;
+      return;
+    }
+    if (data.error) {
+      msg.style.display = 'block';
+      msg.style.color = 'var(--red)';
+      msg.textContent = data.error;
+      if (btn) { btn.disabled = false; btn.textContent = 'Confirm payment & unlock'; }
+      return;
+    }
+    msg.style.display = 'block';
+    msg.style.color = 'var(--green)';
+    msg.textContent = 'Unlocked! Redirecting...';
+  } catch(e) {
+    msg.style.display = 'block';
+    msg.style.color = 'var(--red)';
+    msg.textContent = 'Error sending request. Please email us directly.';
+    if (btn) { btn.disabled = false; btn.textContent = 'Confirm payment & unlock'; }
+  }
+}
+function bindPaywallButtons() {
+  var later = document.getElementById('btnMaybeLater');
+  var paid = document.getElementById('btnPaidStep');
+  var confirmBtn = document.getElementById('btnConfirmUnlock');
+  var modal = document.getElementById('upgradeModal');
+  if (later) later.addEventListener('click', function(e) { e.preventDefault(); closeUpgradeModal(); });
+  if (paid) paid.addEventListener('click', function(e) { e.preventDefault(); showPaidStep(); });
+  if (confirmBtn) confirmBtn.addEventListener('click', function(e) { e.preventDefault(); submitUnlockRequest(); });
+  if (modal) modal.addEventListener('click', function(e) { if (e.target === modal) closeUpgradeModal(); });
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bindPaywallButtons);
+} else {
+  bindPaywallButtons();
+}
+</script>
 
 <script>
 function runShopScan() {
@@ -974,112 +1106,6 @@ async function bulkFix(btn) {
   btn.textContent = 'Fix All Products';
   alert(`Done. Saved ${saved} products to Shopify${failed ? `; ${failed} failed` : ''}.`);
 }
-
-async function handlePayPalSubmit(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  const shop = getPaywallShop();
-  if (!shop) {
-    alert('Please enter your store URL first (e.g. yourstore.myshopify.com).');
-    return false;
-  }
-  try {
-    await fetch('/paypal/register-intent', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({shop})
-    });
-  } catch (err) {}
-  e.target.submit();
-  return false;
-}
-function showUpgradeModal(shop) {
-  var modal = document.getElementById('upgradeModal');
-  if (!modal) return;
-  var shopInput = document.getElementById('paypalShop');
-  if (shopInput) shopInput.value = shop || '';
-  var storeUrl = document.getElementById('upgradeStoreUrl');
-  if (storeUrl && shop) storeUrl.value = shop;
-  var fromPricing = new URLSearchParams(window.location.search).get('upgrade') === '1'
-    || window.location.pathname === '/upgrade';
-  var title = document.querySelector('#upgradeModal .modal-title');
-  var sub = document.querySelector('#upgradeModal .modal-sub');
-  if (title && sub) {
-    if (fromPricing) {
-      title.textContent = 'Upgrade to Unlimited';
-      sub.textContent = 'One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.';
-    } else {
-      title.textContent = "You've used your 5 free actions";
-      sub.textContent = 'Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.';
-    }
-  }
-  document.getElementById('modalStep1').style.display = 'block';
-  document.getElementById('modalStep2').style.display = 'none';
-  modal.classList.add('visible');
-  document.body.classList.add('paywall-open');
-}
-function closeUpgradeModal() {
-  var modal = document.getElementById('upgradeModal');
-  if (modal) modal.classList.remove('visible');
-  document.body.classList.remove('paywall-open');
-  if (window.location.pathname === '/upgrade') {
-    window.location.href = '/app';
-  }
-}
-function showPaidStep() {
-  setTimeout(() => {
-    document.getElementById('modalStep1').style.display = 'none';
-    document.getElementById('modalStep2').style.display = 'block';
-  }, 1500);
-}
-function getPaywallShop() {
-  var el = document.getElementById('upgradeStoreUrl');
-  if (el && el.value.trim()) return el.value.trim();
-  var hidden = document.getElementById('paypalShop');
-  if (hidden && hidden.value.trim()) return hidden.value.trim();
-  var scan = document.getElementById('storeUrl');
-  if (scan && scan.value.trim()) return scan.value.trim();
-  return '';
-}
-async function submitUnlockRequest() {
-  const email = document.getElementById('unlockEmail').value.trim();
-  const shop = getPaywallShop();
-  const msg = document.getElementById('unlockMsg');
-  if (!shop) { alert('Please enter your store URL (e.g. yourstore.myshopify.com).'); return; }
-  if (!email) { alert('Please enter the PayPal email you used to pay.'); return; }
-  const btn = document.querySelector('#modalStep2 .btn-primary');
-  if (btn) { btn.disabled = true; btn.textContent = 'Unlocking...'; }
-  try {
-    const res = await fetch('/request-unlock', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({email, shop, method: 'paypal'})
-    });
-    const data = await res.json();
-    if (data.success && data.redirect) {
-      window.location.href = data.redirect;
-      return;
-    }
-    if (data.error) {
-      msg.style.display = 'block';
-      msg.style.color = 'var(--red)';
-      msg.textContent = data.error;
-      if (btn) { btn.disabled = false; btn.textContent = '提交解锁申请 Submit'; }
-      return;
-    }
-    msg.style.display = 'block';
-    msg.style.color = 'var(--green)';
-    msg.textContent = 'Unlocked! Redirecting...';
-  } catch(e) {
-    msg.style.display = 'block';
-    msg.style.color = 'var(--red)';
-    msg.textContent = 'Error sending request. Please email us directly.';
-    if (btn) { btn.disabled = false; btn.textContent = '提交解锁申请 Submit'; }
-  }
-}
-document.addEventListener('click', e => {
-  if (e.target.id === 'upgradeModal') closeUpgradeModal();
-});
 
 async function subscribe(shop) {
   const email = document.getElementById('subEmail').value.trim();
