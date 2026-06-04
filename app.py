@@ -1556,8 +1556,8 @@ LANDING_TEMPLATE = """
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>AiReady - Is Your Shopify Store Visible to AI?</title>
-  <meta name="description" content="Free tool to check how visible your Shopify products are to ChatGPT, Perplexity, and Gemini."/>
+  <title>AiReady - Free GEO Scanner for Shopify | AI Readiness Score</title>
+  <meta name="description" content="Free GEO (Generative Engine Optimization) scanner for Shopify. Check your AI Readiness Score and get found by ChatGPT, Perplexity, and Gemini."/>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -1701,12 +1701,12 @@ LANDING_TEMPLATE = """
 
 <!-- HERO -->
 <section class="hero">
-  <div class="hero-badge en">NEW &mdash; AI Search Optimization for Shopify</div>
-  <div class="hero-badge zh">新工具 &mdash; Shopify AI 搜索优化</div>
+  <div class="hero-badge en">Free GEO Scanner for Shopify Stores</div>
+  <div class="hero-badge zh">免费 GEO 检测工具 &mdash; 专为 Shopify 出海商家</div>
   <h1 class="en">Is your store <em>invisible</em><br/>to ChatGPT?</h1>
   <h1 class="zh">你的店铺对 ChatGPT <em>隐形</em>吗？</h1>
-  <p class="hero-sub en">AI engines are replacing Google search. If your Shopify products lack structured data, they won't get recommended. Check your store free in 30 seconds.</p>
-  <p class="hero-sub zh">AI 引擎正在取代 Google 搜索。如果你的 Shopify 产品缺少结构化数据，AI 就不会推荐你的产品。30 秒免费扫描，立即找出问题。</p>
+  <p class="hero-sub en">GEO (Generative Engine Optimization) is the new SEO. If your Shopify products lack structured data, ChatGPT, Perplexity, and Gemini won't recommend them. Get your free GEO score in 30 seconds.</p>
+  <p class="hero-sub zh">GEO（生成式引擎优化）是新一代 SEO。如果你的 Shopify 产品缺少结构化数据，ChatGPT、Perplexity、Gemini 就不会推荐你的产品。30 秒免费获取你的 GEO 评分。</p>
   <form class="hero-input-row" action="/app" method="get">
     <input type="text" class="hero-input" id="heroUrl" name="url" placeholder="yourstore.myshopify.com" required />
     <button type="submit" class="btn-hero">
@@ -1720,8 +1720,8 @@ LANDING_TEMPLATE = """
 
 <!-- AI LOGOS -->
 <div class="logos">
-  <div class="logos-label en">Optimize for AI engines</div>
-  <div class="logos-label zh">为以下 AI 引擎优化</div>
+  <div class="logos-label en">GEO-optimize for these AI engines</div>
+  <div class="logos-label zh">为以下 AI 引擎做 GEO 优化</div>
   <div class="logos-row">
     <div class="logo-item">ChatGPT</div>
     <div class="logo-item">Perplexity</div>
@@ -1735,8 +1735,8 @@ LANDING_TEMPLATE = """
 <section class="section">
   <div class="section-label en">The Problem</div>
   <div class="section-label zh">问题所在</div>
-  <h2 class="en">AI is the new search.<br/>Most stores aren't ready.</h2>
-  <h2 class="zh">AI 就是新的搜索引擎。<br/>大多数店铺没有准备好。</h2>
+  <h2 class="en">GEO is the new SEO.<br/>Most Shopify stores are invisible to AI.</h2>
+  <h2 class="zh">GEO 是新一代 SEO。<br/>大多数 Shopify 店铺对 AI 引擎隐形。</h2>
   <p class="section-sub en">When someone asks ChatGPT "what's the best yoga mat under $50", it recommends products with rich, structured data. Missing brand, material, reviews, or GTIN means your products get skipped.</p>
   <p class="section-sub zh">当用户问 ChatGPT「50 美元内最好的瑜伽垫」，AI 会推荐拥有完整结构化数据的产品。缺少品牌、材质、评价或条形码，你的产品就会被跳过。</p>
   <div class="stat-grid">
@@ -1800,7 +1800,7 @@ LANDING_TEMPLATE = """
 <section class="section">
   <div class="section-label en">How it works</div>
   <div class="section-label zh">使用流程</div>
-  <h2 class="en">Three steps to AI visibility</h2>
+  <h2 class="en">Three steps to GEO-ready products</h2>
   <h2 class="zh">三步提升 AI 可见性</h2>
   <div class="steps" style="margin-top:40px;">
     <div class="step">
@@ -1851,7 +1851,7 @@ LANDING_TEMPLATE = """
 <section class="section">
   <div class="section-label en">Features</div>
   <div class="section-label zh">功能</div>
-  <h2 class="en">Everything your store needs<br/>to win AI search</h2>
+  <h2 class="en">Everything your store needs<br/>to win at GEO</h2>
   <h2 class="zh">让你的店铺赢得 AI 搜索<br/>所需的一切</h2>
   <p class="section-sub en">Built specifically for Shopify &mdash; no complex setup required.</p>
   <p class="section-sub zh">专为 Shopify 打造，无需复杂配置。</p>
@@ -2028,8 +2028,8 @@ LANDING_TEMPLATE = """
 
 <!-- CTA BAND -->
 <div class="cta-band">
-  <h2 class="en">Find out your score in 30 seconds</h2>
-  <h2 class="zh">30 秒找出你的评分</h2>
+  <h2 class="en">Get your free GEO score in 30 seconds</h2>
+  <h2 class="zh">30 秒获取你的免费 GEO 评分</h2>
   <p class="en">Free scan, no account needed.</p>
   <p class="zh">免费扫描，无需注册。</p>
   <a href="/app" class="btn-nav" style="font-size:16px;padding:14px 36px;display:inline-block;">
