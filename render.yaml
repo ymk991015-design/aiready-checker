@@ -11,7 +11,7 @@ services:
         sync: false
       - key: APP_BASE_URL
         value: https://aiready-checker.onrender.com
-      - key: PAYPAL_URL
-        value: https://www.paypal.com/paypalme/MingkunYang/9
+      - key: PAYPAL_HOSTED_BUTTON_ID
+        value: VA8TFCR6A8NMY
       - key: USD_PRICE
         value: "9"

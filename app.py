@@ -18,7 +18,7 @@ app.secret_key = os.environ.get('FLASK_SECRET', 'aiready-secret-key-2025')
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 CRON_SECRET = os.environ.get('CRON_SECRET', 'aiready-cron-2025')
 USD_PRICE = float(os.environ.get('USD_PRICE', '9'))
-PAYPAL_URL = os.environ.get('PAYPAL_URL', 'https://www.paypal.com/paypalme/MingkunYang/9')
+PAYPAL_HOSTED_BUTTON_ID = os.environ.get('PAYPAL_HOSTED_BUTTON_ID', 'VA8TFCR6A8NMY')
 APP_BASE_URL = os.environ.get('APP_BASE_URL', 'https://aiready-checker.onrender.com').rstrip('/')
 DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
 DB_PATH = os.environ.get('DB_PATH', os.path.join(tempfile.gettempdir(), 'aiready.db'))
@@ -385,7 +385,9 @@ HTML_TEMPLATE = """
     .modal-feature { font-size:13px; color:#005E45; padding:3px 0; }
     .modal-close { margin-top:14px; font-size:13px; color:var(--text-hint); cursor:pointer; }
     .modal-close:hover { color:var(--text-sub); }
-    .pay-btn { width:100%; padding:14px; font-size:15px; display:block; text-align:center; text-decoration:none; box-sizing:border-box; color:#fff; margin-bottom:12px; }
+    .pay-btn { width:100%; padding:14px; font-size:15px; display:block; text-align:center; text-decoration:none; box-sizing:border-box; color:#fff; margin-bottom:12px; border:none; cursor:pointer; font-family:inherit; }
+    .paypal-form { margin-bottom:12px; }
+    .paypal-form input[type="image"] { width:100%; max-width:240px; height:auto; cursor:pointer; }
     .pay-divider { font-size:12px; color:var(--text-hint); margin:14px 0 10px; }
     .pay-option { background:#F6F6F7; border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px; text-align:left; }
     .pay-option-title { font-size:13px; font-weight:600; color:var(--text); margin-bottom:6px; }
@@ -939,11 +941,11 @@ async function bulkFix(btn) {
   alert(`Done. Saved ${saved} products to Shopify${failed ? `; ${failed} failed` : ''}.`);
 }
 
-async function handlePayPalClick(e) {
+async function handlePayPalSubmit(e) {
+  e.preventDefault();
   e.stopPropagation();
   const shop = getPaywallShop();
   if (!shop) {
-    e.preventDefault();
     alert('Please enter your store URL first (e.g. yourstore.myshopify.com).');
     return false;
   }
@@ -954,8 +956,8 @@ async function handlePayPalClick(e) {
       body: JSON.stringify({shop})
     });
   } catch (err) {}
-  setTimeout(showPaidStep, 100);
-  return true;
+  e.target.submit();
+  return false;
 }
 function showUpgradeModal(shop) {
   var modal = document.getElementById('upgradeModal');
@@ -1229,8 +1231,13 @@ window.addEventListener('load', function() {
       <div class="modal-feature">&#10003; &nbsp; Weekly score reports via email</div>
     </div>
     <div id="modalStep1">
-      <a class="btn-primary pay-btn" href="{{ paypal_url }}" target="_blank" rel="noopener noreferrer" onclick="return handlePayPalClick(event)">Pay ${{ usd_price }} via PayPal &rarr;</a>
-      <div class="pay-amount-hint">Fixed ${{ usd_price }} USD. After paying on PayPal, return here to confirm.</div>
+      <form id="paypalForm" class="paypal-form" action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top" onsubmit="return handlePayPalSubmit(event)">
+        <input type="hidden" name="cmd" value="_s-xclick" />
+        <input type="hidden" name="hosted_button_id" value="{{ paypal_hosted_button_id }}" />
+        <input type="hidden" name="currency_code" value="USD" />
+        <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_buynowCC_LG.gif" border="0" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Buy Now" style="width:100%;max-width:240px;height:auto;" />
+      </form>
+      <div class="pay-amount-hint">Fixed ${{ usd_price }} USD via PayPal. You will return here after payment.</div>
       <button type="button" class="pay-done-btn" onclick="showPaidStep()">I paid on PayPal &rarr;</button>
     </div>
     <div id="modalStep2" style="display:none;margin-top:16px;">
@@ -2016,7 +2023,7 @@ def _render_app_page(open_upgrade=False, shop_prefill='', url_param=''):
         prefill_url=url_param,
         open_upgrade=open_upgrade,
         shop_prefill=shop_prefill,
-        paypal_url=PAYPAL_URL,
+        paypal_hosted_button_id=PAYPAL_HOSTED_BUTTON_ID,
         usd_price=int(USD_PRICE) if USD_PRICE == int(USD_PRICE) else USD_PRICE,
     )
 
