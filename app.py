@@ -362,6 +362,47 @@ def verify_shopify_webhook(raw_body):
     expected = base64.b64encode(digest).decode('utf-8')
     return hmac.compare_digest(expected, incoming_hmac)
 
+def _b64url_decode(value):
+    value = value.encode('utf-8') if isinstance(value, str) else value
+    value += b'=' * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value)
+
+def verify_shopify_session_token(token):
+    if not token or not SHOPIFY_CLIENT_ID or not SHOPIFY_CLIENT_SECRET:
+        return None
+    try:
+        header_b64, payload_b64, sig_b64 = token.split('.', 2)
+        signed = f'{header_b64}.{payload_b64}'.encode('utf-8')
+        expected = hmac.new(SHOPIFY_CLIENT_SECRET.encode('utf-8'), signed, hashlib.sha256).digest()
+        actual = _b64url_decode(sig_b64)
+        if not hmac.compare_digest(expected, actual):
+            return None
+        header = json.loads(_b64url_decode(header_b64).decode('utf-8'))
+        payload = json.loads(_b64url_decode(payload_b64).decode('utf-8'))
+        now = int(time.time())
+        if header.get('alg') != 'HS256':
+            return None
+        if payload.get('aud') != SHOPIFY_CLIENT_ID:
+            return None
+        if int(payload.get('exp', 0)) < now:
+            return None
+        if int(payload.get('nbf', 0)) > now + 5:
+            return None
+        dest = payload.get('dest', '')
+        shop = normalize_shop(dest)
+        if not is_valid_shop(shop):
+            return None
+        payload['shop'] = shop
+        return payload
+    except Exception:
+        return None
+
+def current_shopify_session():
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.lower().startswith('bearer '):
+        return None
+    return verify_shopify_session_token(auth_header.split(None, 1)[1].strip())
+
 def delete_shop_data(shop):
     shop = normalize_shop(shop)
     if not shop or not is_valid_shop(shop):
@@ -924,11 +965,39 @@ function setBillingMode(useShopify) {
     ? 'one-time via Shopify billing - unlimited forever'
     : '{% if shopify_app_context %}one-time - unlimited forever{% else %}one-time via PayPal - unlimited forever{% endif %}';
 }
+async function getShopifySessionToken() {
+  if (!window.shopify || typeof window.shopify.idToken !== 'function') return '';
+  try {
+    if (typeof window.shopify.ready === 'function') {
+      await window.shopify.ready();
+    }
+    return await window.shopify.idToken();
+  } catch (e) {
+    return '';
+  }
+}
+async function appFetch(url, options) {
+  var opts = options || {};
+  var headers = new Headers(opts.headers || {});
+  var token = await getShopifySessionToken();
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', 'Bearer ' + token);
+  }
+  opts.headers = headers;
+  return fetch(url, opts);
+}
+async function verifyEmbeddedSessionToken() {
+  try {
+    var token = await getShopifySessionToken();
+    if (!token) return;
+    await appFetch('/api/session-token-check', {method: 'POST'});
+  } catch (e) {}
+}
 async function refreshBillingMode(shop) {
   var useShopify = !!window.currentShopHasToken;
   if (!useShopify && shop) {
     try {
-      var res = await fetch('/api/usage?shop=' + encodeURIComponent(shop));
+      var res = await appFetch('/api/usage?shop=' + encodeURIComponent(shop));
       var data = await res.json();
       useShopify = !!data.has_token;
     } catch(e) {}
@@ -981,7 +1050,7 @@ async function handlePayPalSubmit(e) {
     return false;
   }
   try {
-    await fetch('/paypal/register-intent', {
+    await appFetch('/paypal/register-intent', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({shop})
@@ -1009,7 +1078,7 @@ async function startShopifyBilling() {
   const btn = document.getElementById('btnShopifyBilling');
   if (btn) { btn.disabled = true; btn.textContent = 'Opening Shopify...'; }
   try {
-    const res = await fetch('/shopify/billing/start', {
+    const res = await appFetch('/shopify/billing/start', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({shop})
@@ -1038,7 +1107,7 @@ async function submitUnlockRequest() {
   const btn = document.getElementById('btnConfirmUnlock');
   if (btn) { btn.disabled = true; btn.textContent = 'Unlocking...'; }
   try {
-    const res = await fetch('/request-unlock', {
+    const res = await appFetch('/request-unlock', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({email, shop, method: 'paypal'})
@@ -1176,7 +1245,7 @@ window.renderResults = function renderResults(data) {
   const priorityFixes = Object.values(weightMap).sort((a,b) => b.weight - a.weight).slice(0,3);
 
   // Usage badge (fetch async, inject after render)
-  fetch('/api/usage?shop=' + encodeURIComponent(s.store))
+  appFetch('/api/usage?shop=' + encodeURIComponent(s.store))
     .then(r => r.json())
     .then(u => {
       const el = document.getElementById('usageBadge');
@@ -1397,7 +1466,7 @@ window.analyzeContent = async function analyzeContent(btn, name, brand, descript
   resultBox.innerHTML = '<span class="spinner"></span> Running GEO content analysis...';
 
   try {
-    const res = await fetch('/analyze', {
+    const res = await appFetch('/analyze', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({name, brand, description})
@@ -1449,7 +1518,7 @@ window.generateDesc = async function generateDesc(btn, name, brand, description,
 
   const shop = lastData && lastData.summary ? lastData.summary.store : '';
   try {
-    const res = await fetch('/generate', {
+    const res = await appFetch('/generate', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({name, brand, description, missing, shop})
@@ -1519,7 +1588,7 @@ window.previewFirstFix = async function previewFirstFix(btn) {
   body.innerHTML = '<span class="spinner"></span> Creating a before/after preview...';
 
   try {
-    const res = await fetch('/generate', {
+    const res = await appFetch('/generate', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -1569,7 +1638,7 @@ async function saveToShopify(btn, productId, shop, description) {
   btn.disabled = true;
   btn.textContent = 'Saving...';
   try {
-    const res = await fetch('/api/update_product', {
+    const res = await appFetch('/api/update_product', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({product_id: productId, shop, description})
@@ -1598,7 +1667,7 @@ async function autoFillBrand(btn, productId, productName, shop) {
   // Extract brand from product name (first word or phrase before dash/comma)
   const brandGuess = productName.split('-')[0].split(',')[0].trim().split(' ').slice(0,2).join(' ');
   try {
-    const res = await fetch('/api/update_vendor', {
+    const res = await appFetch('/api/update_vendor', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({product_id: productId, shop, vendor: brandGuess})
@@ -1639,7 +1708,7 @@ async function bulkFix(btn) {
 
     // Generate description
     try {
-      const genRes = await fetch('/generate', {
+      const genRes = await appFetch('/generate', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
@@ -1656,7 +1725,7 @@ async function bulkFix(btn) {
         break;
       }
       if (genData.description && p.product_id) {
-        const saveRes = await fetch('/api/update_product', {
+        const saveRes = await appFetch('/api/update_product', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({product_id: p.product_id, shop, description: genData.description})
@@ -1703,7 +1772,7 @@ async function subscribe(shop) {
     }));
   }
   try {
-    const res = await fetch('/subscribe', {
+    const res = await appFetch('/subscribe', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload)
@@ -1953,7 +2022,7 @@ async function runScan() {
     var source = params.get('source') || params.get('utm_source') || params.get('ref') || '';
     var ctrl = new AbortController();
     var timer = setTimeout(function() { ctrl.abort(); }, 90000);
-    var res = await fetch('/scan', {
+    var res = await appFetch('/scan', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({url: url, source: source}),
@@ -2037,6 +2106,7 @@ function initPaywallApp() {
   }
 }
 function bootApp() {
+  verifyEmbeddedSessionToken();
   initScanApp();
   initPaywallApp();
 }
@@ -3055,6 +3125,16 @@ def app_page():
         url_param=url_param,
         shopify_app_context=bool(request.args.get('host')),
     )
+
+@app.route('/api/session-token-check', methods=['POST'])
+def session_token_check():
+    token_payload = current_shopify_session()
+    if not token_payload:
+        return jsonify({'error': 'Invalid Shopify session token'}), 401
+    shop = token_payload.get('shop', '')
+    if shop:
+        session['shop'] = shop
+    return jsonify({'ok': True, 'shop': shop})
 
 @app.route('/scan', methods=['POST'])
 def scan():

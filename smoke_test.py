@@ -5,12 +5,34 @@ import importlib
 import json
 import os
 import tempfile
+import time
 from unittest.mock import patch
 
 
 def assert_true(value, message):
     if not value:
         raise AssertionError(message)
+
+def make_shopify_session_token(client_id, secret, shop):
+    def b64url(data):
+        raw = json.dumps(data, separators=(",", ":")).encode("utf-8")
+        return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+    now = int(time.time())
+    header = b64url({"alg": "HS256", "typ": "JWT"})
+    payload = b64url({
+        "iss": f"https://{shop}/admin",
+        "dest": f"https://{shop}",
+        "aud": client_id,
+        "sub": "1",
+        "exp": now + 60,
+        "nbf": now - 5,
+        "iat": now,
+        "jti": "smoke-token",
+    })
+    signed = f"{header}.{payload}".encode("utf-8")
+    sig = base64.urlsafe_b64encode(hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).digest()).decode("utf-8").rstrip("=")
+    return f"{header}.{payload}.{sig}"
 
 
 def fresh_app():
@@ -44,6 +66,8 @@ def test_pages(mod):
     assert_true("Free AI repair preview" in app_html, "AI repair preview missing")
     assert_true('meta name="shopify-api-key"' in app_html, "Shopify App Bridge meta missing")
     assert_true("https://cdn.shopify.com/shopifycloud/app-bridge.js" in app_html, "Shopify App Bridge script missing")
+    assert_true("shopify.idToken" in app_html, "Shopify session token call missing")
+    assert_true("/api/session-token-check" in app_html, "Shopify session token check missing")
     embedded = client.get("/app?shop=embedded-smoke.myshopify.com")
     assert_true(embedded.status_code == 302, "embedded app did not start Shopify install")
     assert_true("/install?shop=embedded-smoke.myshopify.com" in embedded.headers.get("Location", ""), "embedded app install redirect missing shop")
@@ -59,6 +83,11 @@ def test_pages(mod):
     host_only = client.get("/app?host=embedded-host&upgrade=1").get_data(as_text=True)
     assert_true("PayPal" not in host_only, "PayPal was rendered for Shopify host context")
     assert_true("embedded-paid.myshopify.com" in host_only, "host-only Shopify app did not use session shop")
+    token = make_shopify_session_token("smoke-client", "smoke-secret", "embedded-paid.myshopify.com")
+    session_check = client.post("/api/session-token-check", headers={"Authorization": f"Bearer {token}"})
+    assert_true(session_check.status_code == 200, "valid Shopify session token was rejected")
+    missing_token = client.post("/api/session-token-check")
+    assert_true(missing_token.status_code == 401, "missing Shopify session token was accepted")
 
 
 def test_admin_requires_configured_secret(mod):

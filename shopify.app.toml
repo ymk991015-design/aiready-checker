@@ -1,29 +1,30 @@
-# This file publishes Shopify app settings used by the Dev Dashboard checks.
-# After linking this file to the AiReady app, run `shopify app deploy`.
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 name = "AiReady"
 application_url = "https://aiready-checker.onrender.com"
 embedded = true
+client_id = "94588903c50fdf0bd25a6950529a36c8"
 
 [access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_products,write_products"
+optional_scopes = [ ]
+use_legacy_install_flow = false
 
 [auth]
-redirect_urls = [
-  "https://aiready-checker.onrender.com/auth/callback"
-]
+redirect_urls = [ "https://aiready-checker.onrender.com/auth/callback" ]
 
 [webhooks]
 api_version = "2026-04"
 
-[[webhooks.subscriptions]]
-uri = "/webhooks/customers/data_request"
-compliance_topics = ["customers/data_request"]
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/data_request"
+  compliance_topics = [ "customers/data_request" ]
 
-[[webhooks.subscriptions]]
-uri = "/webhooks/customers/redact"
-compliance_topics = ["customers/redact"]
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/redact"
+  compliance_topics = [ "customers/redact" ]
 
-[[webhooks.subscriptions]]
-uri = "/webhooks/shop/redact"
-compliance_topics = ["shop/redact"]
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/shop/redact"
+  compliance_topics = [ "shop/redact" ]
