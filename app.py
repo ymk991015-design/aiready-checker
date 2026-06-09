@@ -2151,6 +2151,10 @@ async function runScan() {
     clearTimeout(timer);
     var data;
     try { data = await res.json(); } catch (e) { data = {error: 'Server error (' + res.status + '). Try gymshark.com or retry.'}; }
+    if (data.redirect) {
+      window.top.location.href = data.redirect;
+      return;
+    }
     if (!res.ok && !data.error) data.error = 'Scan failed (' + res.status + '). Try gymshark.com or wait and retry.';
     if (data.error) {
       results.innerHTML = '<div class="error-banner">Error: ' + scanEsc(data.error) + '</div>';
@@ -3266,8 +3270,17 @@ def scan():
     if not store_url:
         return jsonify({'error': 'Please provide a store URL.'})
     normalized_shop = normalize_shop(store_url)
+    token_payload = current_shopify_session()
+    session_shop = normalize_shop((token_payload or {}).get('shop', ''))
+    if session_shop and is_valid_shop(session_shop):
+        normalized_shop = session_shop
     shopify_products = []
     product_urls = []
+    if normalized_shop and is_valid_shop(normalized_shop) and not has_shop_token(normalized_shop) and session_shop == normalized_shop:
+        return jsonify({
+            'error': 'Please reconnect AiReady to Shopify so it can read products from this store.',
+            'redirect': f'/install?shop={normalized_shop}',
+        }), 401
     if normalized_shop and is_valid_shop(normalized_shop) and has_shop_token(normalized_shop):
         try:
             shopify_products = fetch_shopify_admin_products(normalized_shop)

@@ -97,6 +97,14 @@ def test_pages(mod):
     assert_true(session_check.status_code == 200, "valid Shopify session token was rejected")
     missing_token = client.post("/api/session-token-check")
     assert_true(missing_token.status_code == 401, "missing Shopify session token was accepted")
+    reconnect_token = make_shopify_session_token("smoke-client", "smoke-secret", "needs-reconnect.myshopify.com")
+    reconnect = client.post(
+        "/scan",
+        json={"url": "needs-reconnect.myshopify.com"},
+        headers={"Authorization": f"Bearer {reconnect_token}"},
+    )
+    assert_true(reconnect.status_code == 401, "scan without offline token did not request reconnect")
+    assert_true(reconnect.get_json().get("redirect") == "/install?shop=needs-reconnect.myshopify.com", "reconnect redirect missing")
 
 
 def test_admin_requires_configured_secret(mod):
