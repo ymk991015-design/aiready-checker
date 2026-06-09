@@ -37,12 +37,17 @@ def test_pages(mod):
         assert_true("Content-Security-Policy" in res.headers, f"{path} missing CSP")
     app_html = client.get("/app").get_data(as_text=True)
     assert_true("Approve charge in Shopify" in app_html, "Shopify billing button missing")
+    assert_true("PayPal" in app_html, "standalone PayPal option missing")
     assert_true("Free AI repair preview" in app_html, "AI repair preview missing")
     assert_true('meta name="shopify-api-key"' in app_html, "Shopify App Bridge meta missing")
     assert_true("https://cdn.shopify.com/shopifycloud/app-bridge.js" in app_html, "Shopify App Bridge script missing")
     embedded = client.get("/app?shop=embedded-smoke.myshopify.com")
     assert_true(embedded.status_code == 302, "embedded app did not start Shopify install")
     assert_true("/install?shop=embedded-smoke.myshopify.com" in embedded.headers.get("Location", ""), "embedded app install redirect missing shop")
+    mod.save_shop_token("embedded-paid.myshopify.com", "token", "read_products,write_products")
+    embedded_paid = client.get("/app?shop=embedded-paid.myshopify.com&upgrade=1").get_data(as_text=True)
+    assert_true("Approve charge in Shopify" in embedded_paid, "Shopify billing missing for installed app")
+    assert_true("PayPal" not in embedded_paid, "PayPal was rendered inside installed Shopify app")
 
 
 def test_admin_requires_configured_secret(mod):

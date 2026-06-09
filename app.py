@@ -822,7 +822,7 @@ HTML_TEMPLATE = """
     <div class="modal-title">{% if open_upgrade %}Upgrade to Unlimited{% else %}You've used your 5 free actions{% endif %}</div>
     <div class="modal-sub">{% if open_upgrade %}One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.{% else %}Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.{% endif %}</div>
     <div class="modal-price">${{ usd_price }}</div>
-    <div class="modal-price-sub" id="billingSubtitle">one-time &mdash; unlimited forever</div>
+    <div class="modal-price-sub" id="billingSubtitle">{% if shopify_app_context %}one-time via Shopify billing - unlimited forever{% else %}one-time via PayPal - unlimited forever{% endif %}</div>
     <div class="pay-store-row">
       <label class="pay-amount-label">店铺域名 Store URL <span style="color:#D72C0D">*</span></label>
       <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="document.getElementById('paypalShop').value=this.value" />
@@ -834,10 +834,11 @@ HTML_TEMPLATE = """
       <div class="modal-feature">&#10003; &nbsp; Weekly score reports via email</div>
     </div>
     <div id="modalStep1">
-      <div id="shopifyBillingBox" style="display:none;margin-bottom:12px;">
+      <div id="shopifyBillingBox" style="display:{% if shopify_app_context %}block{% else %}none{% endif %};margin-bottom:12px;">
         <button type="button" id="btnShopifyBilling" class="btn-primary" style="width:100%;padding:14px;font-size:15px;">Approve charge in Shopify</button>
         <div class="pay-amount-hint">For installed Shopify stores, payment is approved securely inside Shopify.</div>
       </div>
+      {% if not shopify_app_context %}
       <div id="paypalBillingBox">
         <form id="paypalForm" class="paypal-form" action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top" onsubmit="return handlePayPalSubmit(event)">
           <input type="hidden" name="cmd" value="_s-xclick" />
@@ -853,7 +854,9 @@ HTML_TEMPLATE = """
         <div class="pay-amount-hint">Fixed ${{ usd_price }} USD via PayPal. You will return here after payment.</div>
         <button type="button" id="btnPaidStep" class="pay-done-btn">I paid on PayPal &rarr;</button>
       </div>
+      {% endif %}
     </div>
+    {% if not shopify_app_context %}
     <div id="modalStep2" style="display:none;margin-top:16px;">
       <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Enter the PayPal email you used to pay ${{ usd_price }}:</p>
       <input type="email" id="unlockEmail" class="scan-input" placeholder="your@paypal.email" style="margin-bottom:8px;" />
@@ -861,6 +864,7 @@ HTML_TEMPLATE = """
       <div id="unlockMsg" style="margin-top:10px;font-size:13px;display:none;"></div>
     </div>
     <input type="hidden" id="paypalShop" value="{{ shop_prefill or '' }}">
+    {% endif %}
     <button type="button" id="btnMaybeLater" class="modal-close">Maybe later</button>
   </div>
 </div>
@@ -901,7 +905,7 @@ function setBillingMode(useShopify) {
   if (paidStep) paidStep.style.display = useShopify ? 'none' : 'block';
   if (subtitle) subtitle.textContent = useShopify
     ? 'one-time via Shopify billing - unlimited forever'
-    : 'one-time via PayPal - unlimited forever';
+    : '{% if shopify_app_context %}one-time - unlimited forever{% else %}one-time via PayPal - unlimited forever{% endif %}';
 }
 async function refreshBillingMode(shop) {
   var useShopify = !!window.currentShopHasToken;
@@ -951,6 +955,7 @@ function getPaywallShop() {
   if (scan && scan.value.trim()) return scan.value.trim();
   return '';
 }
+{% if not shopify_app_context %}
 async function handlePayPalSubmit(e) {
   e.preventDefault();
   const shop = getPaywallShop();
@@ -1044,6 +1049,7 @@ async function submitUnlockRequest() {
     if (btn) { btn.disabled = false; btn.textContent = 'Submit payment email'; }
   }
 }
+{% endif %}
 function bindPaywallButtons() {
   var later = document.getElementById('btnMaybeLater');
   var paid = document.getElementById('btnPaidStep');
@@ -2969,11 +2975,14 @@ def index():
     return render_template_string(LANDING_TEMPLATE)
 
 def _render_app_page(open_upgrade=False, shop_prefill='', url_param=''):
+    normalized_prefill = normalize_shop(shop_prefill)
+    shopify_app_context = bool(normalized_prefill and is_valid_shop(normalized_prefill))
     return render_template_string(
         HTML_TEMPLATE,
         prefill_url=url_param,
         open_upgrade=open_upgrade,
         shop_prefill=shop_prefill,
+        shopify_app_context=shopify_app_context,
         shopify_client_id=SHOPIFY_CLIENT_ID,
         paypal_hosted_button_id=PAYPAL_HOSTED_BUTTON_ID,
         app_base_url=APP_BASE_URL,
@@ -2983,7 +2992,7 @@ def _render_app_page(open_upgrade=False, shop_prefill='', url_param=''):
 
 @app.route('/upgrade')
 def upgrade_page():
-    shop = request.args.get('shop', '').strip().lower()
+    shop = normalize_shop(request.args.get('shop', ''))
     return _render_app_page(open_upgrade=True, shop_prefill=shop)
 
 
