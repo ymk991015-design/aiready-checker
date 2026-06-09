@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 name = "AiReady"
-application_url = "https://aiready-checker.onrender.com"
+application_url = "https://aiready-checker.onrender.com/app"
 embedded = true
 client_id = "94588903c50fdf0bd25a6950529a36c8"
 

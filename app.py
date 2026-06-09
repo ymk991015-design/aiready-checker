@@ -3076,6 +3076,8 @@ def terms():
 
 @app.route('/')
 def index():
+    if request.args.get('host') or request.args.get('shop'):
+        return redirect('/app?' + urlencode(request.args))
     return render_template_string(LANDING_TEMPLATE)
 
 def _render_app_page(open_upgrade=False, shop_prefill='', url_param='', shopify_app_context=False):
