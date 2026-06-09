@@ -1,0 +1,29 @@
+# This file publishes Shopify app settings used by the Dev Dashboard checks.
+# After linking this file to the AiReady app, run `shopify app deploy`.
+
+name = "AiReady"
+application_url = "https://aiready-checker.onrender.com"
+embedded = true
+
+[access_scopes]
+scopes = "read_products,write_products"
+
+[auth]
+redirect_urls = [
+  "https://aiready-checker.onrender.com/auth/callback"
+]
+
+[webhooks]
+api_version = "2026-04"
+
+[[webhooks.subscriptions]]
+uri = "/webhooks/customers/data_request"
+compliance_topics = ["customers/data_request"]
+
+[[webhooks.subscriptions]]
+uri = "/webhooks/customers/redact"
+compliance_topics = ["customers/redact"]
+
+[[webhooks.subscriptions]]
+uri = "/webhooks/shop/redact"
+compliance_topics = ["shop/redact"]
