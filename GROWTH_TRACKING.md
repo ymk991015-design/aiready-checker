@@ -1,0 +1,95 @@
+# AiReady Growth Tracking
+
+Use source links to track which customer acquisition channel creates scans, leads, and paid shops.
+
+## Source Links
+
+Cold email:
+
+```text
+https://aiready-checker.onrender.com/app?source=cold_email
+```
+
+Reddit:
+
+```text
+https://aiready-checker.onrender.com/app?source=reddit
+```
+
+Shopify agency outreach:
+
+```text
+https://aiready-checker.onrender.com/app?source=agency
+```
+
+Partner or manual demo:
+
+```text
+https://aiready-checker.onrender.com/app?source=demo
+```
+
+The app also accepts:
+
+```text
+utm_source
+ref
+```
+
+## Admin Metrics
+
+Use this endpoint with the Render `ADMIN_SECRET` value:
+
+```powershell
+$headers = @{"X-Admin-Secret"="your_admin_secret"}
+Invoke-RestMethod "https://aiready-checker.onrender.com/admin/metrics" -Headers $headers
+```
+
+The response includes:
+
+- total scans
+- unique scanned shops
+- email leads
+- paid shops
+- pending unlock requests
+- suppressed or unsubscribed emails
+- lead rate
+- paid shop rate
+- top scan sources
+- top email lead sources
+- recent scans
+- recent leads
+
+## Lead Follow-Up List
+
+Use this endpoint to see which emails are worth contacting first:
+
+```powershell
+$headers = @{"X-Admin-Secret"="your_admin_secret"}
+Invoke-RestMethod "https://aiready-checker.onrender.com/admin/leads" -Headers $headers
+```
+
+Download as CSV:
+
+```powershell
+$headers = @{"X-Admin-Secret"="your_admin_secret"}
+Invoke-WebRequest "https://aiready-checker.onrender.com/admin/leads?format=csv" -Headers $headers -OutFile aiready-leads.csv
+```
+
+Lead priority:
+
+- `high`: low score, meaningful product count, not paid yet.
+- `medium`: some clear fix opportunity.
+- `low`: already paid, high score, or not enough product data.
+
+## What To Watch First
+
+For the first 100 visitors, track:
+
+- Scan rate: how many visitors actually scan a store.
+- Lead rate: how many scanned stores leave an email.
+- Upgrade rate: how many scanned stores pay.
+- Best source: which source creates the most scans and emails.
+- Best lead source: prioritize channels in `top_lead_sources`, not only `top_sources`.
+- Unsubscribe count: if this rises quickly, the outreach audience or message is wrong.
+
+Do not scale outreach until at least one source produces replies or emails.

@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template_string, redirect, session
+from flask import Flask, request, jsonify, render_template_string, redirect, session, Response
 import requests
 from bs4 import BeautifulSoup
 import json
@@ -11,16 +11,20 @@ import sqlite3
 import tempfile
 import time
 import html
+import csv
+import io
 from urllib.parse import urljoin, urlparse, urlencode, unquote_plus
 from concurrent.futures import ThreadPoolExecutor
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
-app.secret_key = os.environ.get('FLASK_SECRET', 'aiready-secret-key-2025')
+app.secret_key = os.environ.get('FLASK_SECRET') or os.urandom(32)
 
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 REPORT_FROM_EMAIL = os.environ.get('REPORT_FROM_EMAIL', 'AiReady <onboarding@resend.dev>')
-CRON_SECRET = os.environ.get('CRON_SECRET', 'aiready-cron-2025')
+CRON_SECRET = os.environ.get('CRON_SECRET', '')
 USD_PRICE = float(os.environ.get('USD_PRICE', '9'))
+SHOPIFY_BILLING_TEST = os.environ.get('SHOPIFY_BILLING_TEST', '').lower() in ('1', 'true', 'yes')
+SHOPIFY_BILLING_NAME = os.environ.get('SHOPIFY_BILLING_NAME', 'AiReady Unlimited')
 PAYPAL_HOSTED_BUTTON_ID = os.environ.get('PAYPAL_HOSTED_BUTTON_ID', 'VA8TFCR6A8NMY')
 PAYPAL_RECEIVER_EMAIL = os.environ.get('PAYPAL_RECEIVER_EMAIL', '').strip().lower()
 APP_BASE_URL = os.environ.get('APP_BASE_URL', 'https://aiready-checker.onrender.com').rstrip('/')
@@ -29,6 +33,25 @@ DB_PATH = os.environ.get('DB_PATH', os.path.join(tempfile.gettempdir(), 'aiready
 USE_POSTGRES = bool(DATABASE_URL)
 
 FREE_LIMIT = 5  # free AI actions per shop
+
+@app.after_request
+def add_security_headers(response):
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.shopify.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https://www.paypalobjects.com; "
+        "connect-src 'self'; "
+        "form-action 'self' https://www.paypal.com https://www.sandbox.paypal.com; "
+        "frame-ancestors https://admin.shopify.com https://*.myshopify.com; "
+        "base-uri 'self'; "
+        "object-src 'none'"
+    )
+    response.headers.setdefault('Content-Security-Policy', csp)
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    response.headers.setdefault('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+    return response
 
 def db_connect():
     if USE_POSTGRES:
@@ -109,6 +132,28 @@ def init_db():
         shop TEXT NOT NULL,
         created_at {now_type}
     )''')
+    db_execute(f'''CREATE TABLE IF NOT EXISTS scan_events (
+        id {id_type},
+        shop TEXT NOT NULL,
+        source TEXT DEFAULT '',
+        avg_score INTEGER DEFAULT 0,
+        total_products INTEGER DEFAULT 0,
+        created_at {now_type}
+    )''')
+    db_execute(f'''CREATE TABLE IF NOT EXISTS email_suppression (
+        email TEXT PRIMARY KEY,
+        reason TEXT DEFAULT 'unsubscribe',
+        created_at {now_type}
+    )''')
+    db_execute(f'''CREATE TABLE IF NOT EXISTS lead_events (
+        id {id_type},
+        email TEXT NOT NULL,
+        shop TEXT NOT NULL,
+        source TEXT DEFAULT '',
+        avg_score INTEGER DEFAULT 0,
+        total_products INTEGER DEFAULT 0,
+        created_at {now_type}
+    )''')
 
 def is_paid(shop):
     row = db_execute('SELECT 1 FROM paid_shops WHERE shop=?', (shop,), fetchone=True)
@@ -131,6 +176,75 @@ def increment_usage(shop):
 
 def is_valid_email(email):
     return bool(re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', email or ''))
+
+def unsubscribe_token(email):
+    email = (email or '').strip().lower()
+    secret = (ADMIN_SECRET or app.secret_key or 'aiready').encode('utf-8')
+    return hmac.new(secret, email.encode('utf-8'), hashlib.sha256).hexdigest()[:32]
+
+def unsubscribe_url(email):
+    email = (email or '').strip().lower()
+    return f"{APP_BASE_URL}/unsubscribe?email={email}&token={unsubscribe_token(email)}"
+
+def is_suppressed_email(email):
+    row = db_execute('SELECT 1 FROM email_suppression WHERE email=?', ((email or '').strip().lower(),), fetchone=True)
+    return bool(row)
+
+def suppress_email(email, reason='unsubscribe'):
+    email = (email or '').strip().lower()
+    if not email:
+        return
+    db_execute('''INSERT INTO email_suppression (email, reason)
+        VALUES (?, ?)
+        ON CONFLICT(email) DO UPDATE SET reason=excluded.reason
+    ''', (email, reason))
+    db_execute('DELETE FROM subscriptions WHERE email=?', (email,))
+
+def clean_source(source):
+    source = re.sub(r'[^a-zA-Z0-9_.:-]', '', source or '').strip().lower()
+    return source[:80]
+
+def record_scan_event(shop, source, avg_score, total_products):
+    db_execute(
+        '''INSERT INTO scan_events (shop, source, avg_score, total_products)
+           VALUES (?, ?, ?, ?)''',
+        (shop[:255], clean_source(source), int(avg_score or 0), int(total_products or 0))
+    )
+
+def record_lead_event(email, shop, source, avg_score, total_products):
+    db_execute(
+        '''INSERT INTO lead_events (email, shop, source, avg_score, total_products)
+           VALUES (?, ?, ?, ?, ?)''',
+        (
+            (email or '').strip().lower()[:255],
+            (shop or '').strip().lower()[:255],
+            clean_source(source),
+            int(avg_score or 0),
+            int(total_products or 0),
+        )
+    )
+
+def lead_priority(avg_score, total_products, paid):
+    score = 0
+    if not paid:
+        score += 30
+    if avg_score and avg_score < 40:
+        score += 40
+    elif avg_score and avg_score < 65:
+        score += 25
+    elif avg_score:
+        score += 10
+    if total_products >= 100:
+        score += 25
+    elif total_products >= 20:
+        score += 15
+    elif total_products:
+        score += 5
+    if score >= 70:
+        return 'high'
+    if score >= 45:
+        return 'medium'
+    return 'low'
 
 def send_scan_report_email(email, shop, summary=None, products=None):
     if not RESEND_API_KEY:
@@ -159,6 +273,7 @@ def send_scan_report_email(email, shop, summary=None, products=None):
 
     safe_shop = html.escape(shop)
     report_url = f"{APP_BASE_URL}/app?url={safe_shop}&source=email_report"
+    unsub_url = html.escape(unsubscribe_url(email))
     html_body = f"""
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:640px;margin:0 auto;color:#202223;">
   <div style="background:#1A1A1A;padding:18px 22px;border-radius:8px 8px 0 0;">
@@ -182,7 +297,9 @@ def send_scan_report_email(email, shop, summary=None, products=None):
     <div style="text-align:center;margin-top:24px;">
       <a href="{report_url}" style="display:inline-block;background:#008060;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;">Open full report</a>
     </div>
-    <p style="font-size:12px;color:#8C9196;text-align:center;margin-top:18px;">You requested this report from AiReady.</p>
+    <p style="font-size:12px;color:#8C9196;text-align:center;margin-top:18px;">
+      You requested this report from AiReady. <a href="{unsub_url}" style="color:#8C9196;">Unsubscribe</a>
+    </p>
   </div>
 </div>"""
 
@@ -233,6 +350,30 @@ def verify_shopify_hmac(args):
     ).hexdigest()
     return hmac.compare_digest(digest, incoming_hmac)
 
+def verify_shopify_webhook(raw_body):
+    incoming_hmac = request.headers.get('X-Shopify-Hmac-Sha256', '')
+    if not incoming_hmac or not SHOPIFY_CLIENT_SECRET:
+        return False
+    digest = hmac.new(
+        SHOPIFY_CLIENT_SECRET.encode('utf-8'),
+        raw_body,
+        hashlib.sha256
+    ).digest()
+    expected = base64.b64encode(digest).decode('utf-8')
+    return hmac.compare_digest(expected, incoming_hmac)
+
+def delete_shop_data(shop):
+    shop = normalize_shop(shop)
+    if not shop or not is_valid_shop(shop):
+        return False
+    db_execute('DELETE FROM shop_tokens WHERE shop=?', (shop,))
+    db_execute('DELETE FROM subscriptions WHERE shop=?', (shop,))
+    db_execute('DELETE FROM usage_counts WHERE shop=?', (shop,))
+    db_execute('DELETE FROM paid_shops WHERE shop=?', (shop,))
+    db_execute('DELETE FROM unlock_requests WHERE shop=?', (shop,))
+    db_execute('DELETE FROM paypal_intents WHERE shop=?', (shop,))
+    return True
+
 def save_shop_token(shop, access_token, scope=''):
     db_execute('''INSERT INTO shop_tokens (shop, access_token, scope, updated_at)
         VALUES (?, ?, ?, datetime('now'))
@@ -241,6 +382,126 @@ def save_shop_token(shop, access_token, scope=''):
             scope=excluded.scope,
             updated_at=datetime('now')
     ''', (shop, access_token, scope or ''))
+
+def shopify_product_gid(product_id):
+    product_id = str(product_id or '').strip()
+    if product_id.startswith('gid://shopify/Product/'):
+        return product_id
+    if product_id.isdigit():
+        return f'gid://shopify/Product/{product_id}'
+    return product_id
+
+def register_app_uninstalled_webhook(shop, access_token):
+    shop = normalize_shop(shop)
+    if not shop or not access_token:
+        return False
+    target = f'{APP_BASE_URL}/webhooks/app/uninstalled'
+    mutation = """
+    mutation RegisterAppUninstalledWebhook($topic: WebhookSubscriptionTopic!, $webhookSubscription: WebhookSubscriptionInput!) {
+      webhookSubscriptionCreate(topic: $topic, webhookSubscription: $webhookSubscription) {
+        webhookSubscription {
+          id
+          topic
+          uri
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    """
+    try:
+        data = shopify_graphql(
+            shop,
+            access_token,
+            mutation,
+            {
+                'topic': 'APP_UNINSTALLED',
+                'webhookSubscription': {'uri': target},
+            },
+        )
+        payload = data.get('webhookSubscriptionCreate') or {}
+        errors = payload.get('userErrors') or []
+        if payload.get('webhookSubscription'):
+            return True
+        if errors and any('already' in (err.get('message', '').lower()) for err in errors):
+            return True
+        if errors:
+            app.logger.warning('Shopify webhook registration returned errors for %s: %s', shop, errors)
+    except Exception as exc:
+        app.logger.warning('Failed to register app/uninstalled webhook for %s: %s', shop, exc)
+    return False
+
+def shopify_graphql(shop, access_token, query, variables=None):
+    resp = requests.post(
+        f'https://{shop}/admin/api/{SHOPIFY_API_VERSION}/graphql.json',
+        headers={
+            'X-Shopify-Access-Token': access_token,
+            'Content-Type': 'application/json',
+        },
+        json={'query': query, 'variables': variables or {}},
+        timeout=15,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError(f'Shopify GraphQL {resp.status_code}: {resp.text[:500]}')
+    data = resp.json()
+    if data.get('errors'):
+        raise RuntimeError(json.dumps(data['errors'])[:500])
+    return data.get('data') or {}
+
+def mark_shop_paid(shop, source):
+    db_execute('''INSERT INTO paid_shops (shop, paypal_txn_id, paid_at)
+        VALUES (?, ?, datetime('now'))
+        ON CONFLICT(shop) DO UPDATE SET
+            paypal_txn_id=excluded.paypal_txn_id,
+            paid_at=datetime('now')
+    ''', (shop, source))
+
+def sync_shopify_billing_status(shop):
+    shop = normalize_shop(shop)
+    token = get_shop_token(shop)
+    if not shop or not token:
+        return False
+    query = """
+    query CurrentAppPurchases {
+      currentAppInstallation {
+        oneTimePurchases(first: 20, reverse: true, sortKey: CREATED_AT) {
+          edges {
+            node {
+              id
+              name
+              status
+              test
+              price { amount currencyCode }
+            }
+          }
+        }
+      }
+    }
+    """
+    try:
+        data = shopify_graphql(shop, token, query)
+    except Exception as exc:
+        app.logger.warning('Failed to sync Shopify billing for %s: %s', shop, exc)
+        return False
+    purchases = (((data.get('currentAppInstallation') or {}).get('oneTimePurchases') or {}).get('edges') or [])
+    for edge in purchases:
+        node = edge.get('node') or {}
+        price = node.get('price') or {}
+        try:
+            amount = float(price.get('amount') or 0)
+        except (TypeError, ValueError):
+            amount = 0
+        if (
+            node.get('name') == SHOPIFY_BILLING_NAME
+            and node.get('status') == 'ACTIVE'
+            and price.get('currencyCode') == 'USD'
+            and amount + 0.01 >= USD_PRICE
+        ):
+            mark_shop_paid(shop, 'shopify:' + node.get('id', 'one-time-purchase'))
+            return True
+    return False
 
 def get_shop_token(shop):
     row = db_execute('SELECT access_token FROM shop_tokens WHERE shop=?', (shop,), fetchone=True)
@@ -287,6 +548,10 @@ HTML_TEMPLATE = """
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>AiReady - AI Readiness Checker</title>
+  {% if shopify_client_id %}
+  <meta name="shopify-api-key" content="{{ shopify_client_id }}"/>
+  <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+  {% endif %}
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -557,7 +822,7 @@ HTML_TEMPLATE = """
     <div class="modal-title">{% if open_upgrade %}Upgrade to Unlimited{% else %}You've used your 5 free actions{% endif %}</div>
     <div class="modal-sub">{% if open_upgrade %}One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.{% else %}Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.{% endif %}</div>
     <div class="modal-price">${{ usd_price }}</div>
-    <div class="modal-price-sub">one-time via PayPal &mdash; unlimited forever</div>
+    <div class="modal-price-sub" id="billingSubtitle">one-time &mdash; unlimited forever</div>
     <div class="pay-store-row">
       <label class="pay-amount-label">店铺域名 Store URL <span style="color:#D72C0D">*</span></label>
       <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="document.getElementById('paypalShop').value=this.value" />
@@ -569,19 +834,25 @@ HTML_TEMPLATE = """
       <div class="modal-feature">&#10003; &nbsp; Weekly score reports via email</div>
     </div>
     <div id="modalStep1">
-      <form id="paypalForm" class="paypal-form" action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top" onsubmit="return handlePayPalSubmit(event)">
-        <input type="hidden" name="cmd" value="_s-xclick" />
-        <input type="hidden" name="hosted_button_id" value="{{ paypal_hosted_button_id }}" />
-        <input type="hidden" name="currency_code" value="USD" />
-        <input type="hidden" name="custom" id="paypalCustom" value="{{ shop_prefill or '' }}" />
-        <input type="hidden" name="notify_url" value="{{ app_base_url }}/paypal/ipn" />
-        <input type="hidden" name="return" id="paypalReturn" value="{{ app_base_url }}/paypal/return?shop={{ shop_prefill or '' }}" />
-        <input type="hidden" name="cancel_return" id="paypalCancelReturn" value="{{ app_base_url }}/upgrade?shop={{ shop_prefill or '' }}" />
-        <input type="hidden" name="cbt" value="Return to AiReady" />
-        <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_buynowCC_LG.gif" border="0" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Buy Now" style="width:100%;max-width:240px;height:auto;" />
-      </form>
-      <div class="pay-amount-hint">Fixed ${{ usd_price }} USD via PayPal. You will return here after payment.</div>
-      <button type="button" id="btnPaidStep" class="pay-done-btn">I paid on PayPal &rarr;</button>
+      <div id="shopifyBillingBox" style="display:none;margin-bottom:12px;">
+        <button type="button" id="btnShopifyBilling" class="btn-primary" style="width:100%;padding:14px;font-size:15px;">Approve charge in Shopify</button>
+        <div class="pay-amount-hint">For installed Shopify stores, payment is approved securely inside Shopify.</div>
+      </div>
+      <div id="paypalBillingBox">
+        <form id="paypalForm" class="paypal-form" action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top" onsubmit="return handlePayPalSubmit(event)">
+          <input type="hidden" name="cmd" value="_s-xclick" />
+          <input type="hidden" name="hosted_button_id" value="{{ paypal_hosted_button_id }}" />
+          <input type="hidden" name="currency_code" value="USD" />
+          <input type="hidden" name="custom" id="paypalCustom" value="{{ shop_prefill or '' }}" />
+          <input type="hidden" name="notify_url" value="{{ app_base_url }}/paypal/ipn" />
+          <input type="hidden" name="return" id="paypalReturn" value="{{ app_base_url }}/paypal/return?shop={{ shop_prefill or '' }}" />
+          <input type="hidden" name="cancel_return" id="paypalCancelReturn" value="{{ app_base_url }}/upgrade?shop={{ shop_prefill or '' }}" />
+          <input type="hidden" name="cbt" value="Return to AiReady" />
+          <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_buynowCC_LG.gif" border="0" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Buy Now" style="width:100%;max-width:240px;height:auto;" />
+        </form>
+        <div class="pay-amount-hint">Fixed ${{ usd_price }} USD via PayPal. You will return here after payment.</div>
+        <button type="button" id="btnPaidStep" class="pay-done-btn">I paid on PayPal &rarr;</button>
+      </div>
     </div>
     <div id="modalStep2" style="display:none;margin-top:16px;">
       <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Enter the PayPal email you used to pay ${{ usd_price }}:</p>
@@ -620,6 +891,29 @@ function showPaidStep() {
   var email = document.getElementById('unlockEmail');
   if (email) email.focus();
 }
+function setBillingMode(useShopify) {
+  var shopifyBox = document.getElementById('shopifyBillingBox');
+  var paypalBox = document.getElementById('paypalBillingBox');
+  var paidStep = document.getElementById('btnPaidStep');
+  var subtitle = document.getElementById('billingSubtitle');
+  if (shopifyBox) shopifyBox.style.display = useShopify ? 'block' : 'none';
+  if (paypalBox) paypalBox.style.display = useShopify ? 'none' : 'block';
+  if (paidStep) paidStep.style.display = useShopify ? 'none' : 'block';
+  if (subtitle) subtitle.textContent = useShopify
+    ? 'one-time via Shopify billing - unlimited forever'
+    : 'one-time via PayPal - unlimited forever';
+}
+async function refreshBillingMode(shop) {
+  var useShopify = !!window.currentShopHasToken;
+  if (!useShopify && shop) {
+    try {
+      var res = await fetch('/api/usage?shop=' + encodeURIComponent(shop));
+      var data = await res.json();
+      useShopify = !!data.has_token;
+    } catch(e) {}
+  }
+  setBillingMode(useShopify);
+}
 function showUpgradeModal(shop) {
   var modal = document.getElementById('upgradeModal');
   if (!modal) return;
@@ -644,6 +938,7 @@ function showUpgradeModal(shop) {
   var step2 = document.getElementById('modalStep2');
   if (step1) step1.style.display = 'block';
   if (step2) step2.style.display = 'none';
+  refreshBillingMode(shop || getPaywallShop());
   modal.classList.add('visible');
   document.body.classList.add('paywall-open');
 }
@@ -682,6 +977,35 @@ async function handlePayPalSubmit(e) {
   if (cancel) cancel.value = '{{ app_base_url }}/upgrade?shop=' + encodeURIComponent(normalizedShop);
   document.getElementById('paypalForm').submit();
   return false;
+}
+async function startShopifyBilling() {
+  const shop = getPaywallShop();
+  if (!shop) {
+    alert('Please enter your store URL first (e.g. yourstore.myshopify.com).');
+    return;
+  }
+  const btn = document.getElementById('btnShopifyBilling');
+  if (btn) { btn.disabled = true; btn.textContent = 'Opening Shopify...'; }
+  try {
+    const res = await fetch('/shopify/billing/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({shop})
+    });
+    const data = await res.json();
+    if (data.redirect) {
+      window.location.href = data.redirect;
+      return;
+    }
+    if (data.confirmationUrl) {
+      window.top.location.href = data.confirmationUrl;
+      return;
+    }
+    alert(data.error || 'Could not start Shopify billing.');
+  } catch(e) {
+    alert('Could not connect to Shopify billing. Please try again.');
+  }
+  if (btn) { btn.disabled = false; btn.textContent = 'Approve charge in Shopify'; }
 }
 async function submitUnlockRequest() {
   const email = document.getElementById('unlockEmail').value.trim();
@@ -724,11 +1048,14 @@ function bindPaywallButtons() {
   var later = document.getElementById('btnMaybeLater');
   var paid = document.getElementById('btnPaidStep');
   var confirmBtn = document.getElementById('btnConfirmUnlock');
+  var shopifyBilling = document.getElementById('btnShopifyBilling');
   var modal = document.getElementById('upgradeModal');
   if (later) later.addEventListener('click', function(e) { e.preventDefault(); closeUpgradeModal(); });
   if (paid) paid.addEventListener('click', function(e) { e.preventDefault(); showPaidStep(); });
   if (confirmBtn) confirmBtn.addEventListener('click', function(e) { e.preventDefault(); submitUnlockRequest(); });
+  if (shopifyBilling) shopifyBilling.addEventListener('click', function(e) { e.preventDefault(); startShopifyBilling(); });
   if (modal) modal.addEventListener('click', function(e) { if (e.target === modal) closeUpgradeModal(); });
+  if (modal && modal.classList.contains('visible')) refreshBillingMode(getPaywallShop());
 }
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', bindPaywallButtons);
@@ -756,6 +1083,7 @@ const FIX_HINTS = {
 };
 
 var lastData = null;
+window.currentShopHasToken = false;
 
 function scoreClass(s) {
   if (s >= 70) return 'score-high';
@@ -796,6 +1124,7 @@ window.renderResults = function renderResults(data) {
   if (fc) fc.style.display = 'none';
   lastData = data;
   window.lastData = data;
+  window.currentShopHasToken = !!(data.summary && data.summary.has_token);
   const results = document.getElementById('results');
   const s = data.summary;
   const totalIssues = data.products.reduce((a,p) => a + (p.missing || []).length, 0);
@@ -1016,7 +1345,7 @@ function toggleRow(idx) {
 window.toggleRow = toggleRow;
 
 function shareScore(score, store) {
-  const text = `My Shopify store scored ${score}/100 on AI Readiness - meaning AI engines like ChatGPT and Perplexity may not be recommending my products. Check your store free: https://aiready-checker.onrender.com`;
+  const text = `My Shopify store scored ${score}/100 on AI Readiness - meaning AI engines like ChatGPT and Perplexity may not be recommending my products. Check your store free: {{ app_base_url }}`;
   navigator.clipboard.writeText(text).then(() => {
     alert('Score text copied! Paste it anywhere to share.');
   }).catch(() => {
@@ -1328,6 +1657,8 @@ async function subscribe(shop) {
   if (!shop) { alert('Please scan a store first.'); return; }
   const msg = document.getElementById('subMsg');
   const payload = {email, shop};
+  const params = new URLSearchParams(window.location.search);
+  payload.source = params.get('source') || params.get('utm_source') || params.get('ref') || '';
   if (lastData && lastData.summary) {
     payload.summary = lastData.summary;
     payload.products = (lastData.products || []).slice(0, 10).map(p => ({
@@ -1458,7 +1789,7 @@ function downloadPDF() {
 
   doc.setTextColor(140, 145, 150);
   doc.setFontSize(8);
-  doc.text('Generated by AiReady - aiready-checker.onrender.com', 20, 290);
+  doc.text('Generated by AiReady - {{ app_base_url }}', 20, 290);
 
   doc.save('aiready-report-' + s.store + '-' + date.split('/').join('-') + '.pdf');
 }
@@ -1583,12 +1914,14 @@ async function runScan() {
   btn.textContent = 'Scanning...';
   results.innerHTML = '<div class="loading-state"><div class="loading-spinner"></div><p>Scanning up to 20 products - this may take 20-30 seconds...</p></div>';
   try {
+    var params = new URLSearchParams(window.location.search);
+    var source = params.get('source') || params.get('utm_source') || params.get('ref') || '';
     var ctrl = new AbortController();
     var timer = setTimeout(function() { ctrl.abort(); }, 90000);
     var res = await fetch('/scan', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({url: url}),
+      body: JSON.stringify({url: url, source: source}),
       signal: ctrl.signal
     });
     clearTimeout(timer);
@@ -2535,7 +2868,7 @@ PRIVACY_TEMPLATE = """
   </ul>
 
   <h2>4. Data Retention</h2>
-  <p>We retain your data for as long as your account is active or as needed to provide services. You may request deletion of your data at any time by contacting us.</p>
+  <p>We retain your data for as long as your account is active or as needed to provide services. You may request deletion of your data at any time by contacting us. If you uninstall the Shopify app or Shopify sends a shop redaction webhook, we remove stored app tokens and shop-level records associated with that store.</p>
 
   <h2>5. Security</h2>
   <p>We take reasonable measures to protect your information. Shopify access tokens are stored securely and never exposed publicly. However, no method of transmission over the internet is 100% secure.</p>
@@ -2641,6 +2974,7 @@ def _render_app_page(open_upgrade=False, shop_prefill='', url_param=''):
         prefill_url=url_param,
         open_upgrade=open_upgrade,
         shop_prefill=shop_prefill,
+        shopify_client_id=SHOPIFY_CLIENT_ID,
         paypal_hosted_button_id=PAYPAL_HOSTED_BUTTON_ID,
         app_base_url=APP_BASE_URL,
         usd_price=int(USD_PRICE) if USD_PRICE == int(USD_PRICE) else USD_PRICE,
@@ -2657,7 +2991,13 @@ def upgrade_page():
 def app_page():
     url_param = request.args.get('url', '')
     open_upgrade = request.args.get('upgrade') == '1'
-    shop_prefill = request.args.get('shop', '').strip().lower()
+    shop_prefill = normalize_shop(request.args.get('shop', ''))
+    if shop_prefill and is_valid_shop(shop_prefill) and not has_shop_token(shop_prefill):
+        install_params = {'shop': shop_prefill}
+        host = request.args.get('host', '')
+        if host:
+            install_params['host'] = host
+        return redirect('/install?' + urlencode(install_params))
     return _render_app_page(
         open_upgrade=open_upgrade,
         shop_prefill=shop_prefill,
@@ -2668,6 +3008,7 @@ def app_page():
 def scan():
     data = request.get_json() or {}
     store_url = data.get('url', '').strip()
+    source = clean_source(data.get('source', '') or request.args.get('source', ''))
     if not store_url:
         return jsonify({'error': 'Please provide a store URL.'})
     product_urls, shopify_products = get_product_urls(store_url)
@@ -2724,6 +3065,7 @@ def scan():
 
     # Check if this shop has an authenticated token
     has_token = has_shop_token(normalize_shop(store_domain))
+    record_scan_event(store_domain, source, avg_score, len(results))
 
     return jsonify({
         'products': results,
@@ -2741,10 +3083,21 @@ def api_usage():
     shop = request.args.get('shop', '').strip().lower()
     if not shop:
         return jsonify({'error': 'shop required'}), 400
+    normalized = normalize_shop(shop)
+    if normalized and is_valid_shop(normalized):
+        sync_shopify_billing_status(normalized)
+        shop = normalized
     paid = is_paid(shop)
     used = get_usage(shop)
     remaining = None if paid else max(0, FREE_LIMIT - used)
-    return jsonify({'shop': shop, 'paid': paid, 'used': used, 'remaining': remaining, 'limit': FREE_LIMIT})
+    return jsonify({
+        'shop': shop,
+        'paid': paid,
+        'used': used,
+        'remaining': remaining,
+        'limit': FREE_LIMIT,
+        'has_token': has_shop_token(shop),
+    })
 
 
 @app.route('/paypal/register-intent', methods=['POST'])
@@ -2802,13 +3155,56 @@ def paypal_ipn():
             if row:
                 shop = row[0]
         if shop and is_valid_shop(shop):
-            db_execute('''INSERT INTO paid_shops (shop, paypal_txn_id, paid_at)
-                VALUES (?, ?, datetime('now'))
-                ON CONFLICT(shop) DO UPDATE SET
-                    paypal_txn_id=excluded.paypal_txn_id,
-                    paid_at=datetime('now')
-            ''', (shop, txn_id or 'paypal-ipn'))
+            mark_shop_paid(shop, txn_id or 'paypal-ipn')
     return 'OK', 200
+
+
+@app.route('/shopify/billing/start', methods=['POST'])
+def shopify_billing_start():
+    data = request.get_json() or {}
+    shop = normalize_shop(data.get('shop', session.get('shop', '')))
+    token = get_shop_token(shop)
+    if not shop or not token:
+        return jsonify({'error': 'Install the Shopify app before upgrading through Shopify.'}), 401
+    if is_paid(shop) or sync_shopify_billing_status(shop):
+        return jsonify({'success': True, 'already_paid': True, 'redirect': f'/app?shop={shop}&unlocked=1'})
+
+    mutation = """
+    mutation AppPurchaseOneTimeCreate($name: String!, $price: MoneyInput!, $returnUrl: URL!, $test: Boolean) {
+      appPurchaseOneTimeCreate(name: $name, returnUrl: $returnUrl, price: $price, test: $test) {
+        userErrors { field message }
+        appPurchaseOneTime { id }
+        confirmationUrl
+      }
+    }
+    """
+    variables = {
+        'name': SHOPIFY_BILLING_NAME,
+        'returnUrl': f'{APP_BASE_URL}/shopify/billing/return?shop={shop}',
+        'price': {'amount': USD_PRICE, 'currencyCode': 'USD'},
+        'test': SHOPIFY_BILLING_TEST,
+    }
+    try:
+        result = shopify_graphql(shop, token, mutation, variables)
+        payload = result.get('appPurchaseOneTimeCreate') or {}
+        errors = payload.get('userErrors') or []
+        if errors:
+            return jsonify({'error': '; '.join(e.get('message', 'Billing error') for e in errors)}), 400
+        confirmation_url = payload.get('confirmationUrl')
+        if not confirmation_url:
+            return jsonify({'error': 'Shopify did not return a billing confirmation URL.'}), 400
+        return jsonify({'success': True, 'confirmationUrl': confirmation_url})
+    except Exception as exc:
+        app.logger.warning('Failed to create Shopify billing charge for %s: %s', shop, exc)
+        return jsonify({'error': 'Could not start Shopify billing. Please try again.'}), 500
+
+
+@app.route('/shopify/billing/return')
+def shopify_billing_return():
+    shop = normalize_shop(request.args.get('shop', session.get('shop', '')))
+    if shop and sync_shopify_billing_status(shop):
+        return redirect(f'/app?shop={shop}&unlocked=1')
+    return redirect(f'/upgrade?shop={shop}&billing=pending' if shop else '/upgrade?billing=pending')
 
 
 @app.route('/generate', methods=['POST'])
@@ -2939,7 +3335,7 @@ def install():
     params = {
         'client_id': SHOPIFY_CLIENT_ID,
         'scope': SHOPIFY_SCOPES,
-        'redirect_uri': 'https://aiready-checker.onrender.com/auth/callback',
+        'redirect_uri': f'{APP_BASE_URL}/auth/callback',
         'state': state,
     }
     auth_url = f"https://{shop}/admin/oauth/authorize?{urlencode(params)}"
@@ -2977,6 +3373,7 @@ def auth_callback():
     if not access_token:
         return 'Missing access token from Shopify.', 400
     save_shop_token(shop, access_token, token_data.get('scope', ''))
+    register_app_uninstalled_webhook(shop, access_token)
     session['shop'] = shop
 
     # Redirect back into the embedded app with shop param so it auto-scans
@@ -2986,25 +3383,140 @@ def auth_callback():
     return redirect(f'/app?shop={shop}')
 
 
+@app.route('/webhooks/app/uninstalled', methods=['POST'])
+def webhook_app_uninstalled():
+    raw_body = request.get_data()
+    if not verify_shopify_webhook(raw_body):
+        return 'Invalid webhook signature', 401
+    shop = request.headers.get('X-Shopify-Shop-Domain', '')
+    if not shop:
+        try:
+            shop = (json.loads(raw_body.decode('utf-8')) or {}).get('domain', '')
+        except Exception:
+            shop = ''
+    delete_shop_data(shop)
+    return '', 200
+
+
+@app.route('/webhooks/customers/data_request', methods=['POST'])
+def webhook_customers_data_request():
+    raw_body = request.get_data()
+    if not verify_shopify_webhook(raw_body):
+        return 'Invalid webhook signature', 401
+    return jsonify({
+        'message': 'AiReady does not store Shopify customer personal data.'
+    }), 200
+
+
+@app.route('/webhooks/customers/redact', methods=['POST'])
+def webhook_customers_redact():
+    raw_body = request.get_data()
+    if not verify_shopify_webhook(raw_body):
+        return 'Invalid webhook signature', 401
+    return '', 200
+
+
+@app.route('/webhooks/shop/redact', methods=['POST'])
+def webhook_shop_redact():
+    raw_body = request.get_data()
+    if not verify_shopify_webhook(raw_body):
+        return 'Invalid webhook signature', 401
+    shop = request.headers.get('X-Shopify-Shop-Domain', '')
+    if not shop:
+        try:
+            payload = json.loads(raw_body.decode('utf-8')) or {}
+            shop = payload.get('shop_domain') or payload.get('domain') or ''
+        except Exception:
+            shop = ''
+    delete_shop_data(shop)
+    return '', 200
+
+
 @app.route('/api/products')
 def api_products():
-    """Fetch products directly from Shopify Admin API using stored token."""
+    """Fetch products directly from Shopify GraphQL Admin API using stored token."""
     shop = normalize_shop(request.args.get('shop', session.get('shop', '')))
     token = get_shop_token(shop)
     if not shop or not token:
         return jsonify({'error': 'Not authenticated. Please install the app first.'}), 401
-    resp = requests.get(
-        f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/products.json?limit=20",
-        headers={'X-Shopify-Access-Token': token}
-    )
-    if resp.status_code != 200:
+    query = """
+    query AiReadyProducts {
+      products(first: 20) {
+        edges {
+          node {
+            id
+            legacyResourceId
+            title
+            handle
+            vendor
+            descriptionHtml
+            onlineStoreUrl
+            featuredMedia {
+              preview {
+                image {
+                  url
+                }
+              }
+            }
+            options {
+              name
+              values
+            }
+            variants(first: 20) {
+              edges {
+                node {
+                  id
+                  legacyResourceId
+                  sku
+                  barcode
+                  price
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    try:
+        data = shopify_graphql(shop, token, query)
+    except Exception as exc:
+        app.logger.warning('Failed to fetch products through GraphQL for %s: %s', shop, exc)
         return jsonify({'error': 'Failed to fetch products from Shopify.'}), 400
-    return jsonify(resp.json())
+
+    products = []
+    for edge in (((data.get('products') or {}).get('edges')) or []):
+        node = edge.get('node') or {}
+        image_url = (((node.get('featuredMedia') or {}).get('preview') or {}).get('image') or {}).get('url')
+        variants = []
+        for variant_edge in (((node.get('variants') or {}).get('edges')) or []):
+            variant = variant_edge.get('node') or {}
+            variants.append({
+                'id': str(variant.get('legacyResourceId') or variant.get('id') or ''),
+                'admin_graphql_api_id': variant.get('id', ''),
+                'sku': variant.get('sku') or '',
+                'barcode': variant.get('barcode') or '',
+                'price': str(variant.get('price') or ''),
+                'available': True,
+            })
+        products.append({
+            'id': str(node.get('legacyResourceId') or node.get('id') or ''),
+            'admin_graphql_api_id': node.get('id', ''),
+            'title': node.get('title') or '',
+            'handle': node.get('handle') or '',
+            'vendor': node.get('vendor') or '',
+            'body_html': node.get('descriptionHtml') or '',
+            'online_store_url': node.get('onlineStoreUrl') or '',
+            'images': [{'src': image_url}] if image_url else [],
+            'options': node.get('options') or [],
+            'variants': variants,
+        })
+    return jsonify({'products': products})
 
 
 @app.route('/api/update_vendor', methods=['POST'])
 def update_vendor():
-    """Update product vendor/brand via Shopify Admin API."""
+    """Update product vendor/brand via Shopify GraphQL Admin API."""
     data = request.get_json()
     shop = normalize_shop(data.get('shop', session.get('shop', '')))
     product_id = data.get('product_id')
@@ -3016,19 +3528,33 @@ def update_vendor():
     if not product_id:
         return jsonify({'error': 'Missing product_id.'}), 400
 
-    resp = requests.put(
-        f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/products/{product_id}.json",
-        headers={'X-Shopify-Access-Token': token, 'Content-Type': 'application/json'},
-        json={'product': {'id': product_id, 'vendor': vendor}}
-    )
-    if resp.status_code != 200:
+    mutation = """
+    mutation AiReadyUpdateVendor($product: ProductUpdateInput!) {
+      productUpdate(product: $product) {
+        product { id }
+        userErrors { field message }
+      }
+    }
+    """
+    try:
+        data = shopify_graphql(
+            shop,
+            token,
+            mutation,
+            {'product': {'id': shopify_product_gid(product_id), 'vendor': vendor}},
+        )
+    except Exception as exc:
+        app.logger.warning('Failed to update vendor through GraphQL for %s: %s', shop, exc)
         return jsonify({'error': 'Failed to update vendor.'}), 400
+    errors = ((data.get('productUpdate') or {}).get('userErrors')) or []
+    if errors:
+        return jsonify({'error': '; '.join(err.get('message', 'Failed to update vendor.') for err in errors)}), 400
     return jsonify({'success': True})
 
 
 @app.route('/api/update_product', methods=['POST'])
 def update_product():
-    """Update a product description via Shopify Admin API."""
+    """Update a product description via Shopify GraphQL Admin API."""
     data = request.get_json()
     shop = normalize_shop(data.get('shop', session.get('shop', '')))
     product_id = data.get('product_id')
@@ -3046,18 +3572,32 @@ def update_product():
         if used >= FREE_LIMIT:
             return jsonify({'error': 'LIMIT_REACHED', 'used': used, 'limit': FREE_LIMIT}), 402
 
-    resp = requests.put(
-        f"https://{shop}/admin/api/{SHOPIFY_API_VERSION}/products/{product_id}.json",
-        headers={'X-Shopify-Access-Token': token, 'Content-Type': 'application/json'},
-        json={'product': {'id': product_id, 'body_html': new_description}}
-    )
-    if resp.status_code != 200:
+    mutation = """
+    mutation AiReadyUpdateDescription($product: ProductUpdateInput!) {
+      productUpdate(product: $product) {
+        product { id }
+        userErrors { field message }
+      }
+    }
+    """
+    try:
+        data = shopify_graphql(
+            shop,
+            token,
+            mutation,
+            {'product': {'id': shopify_product_gid(product_id), 'descriptionHtml': new_description}},
+        )
+    except Exception as exc:
+        app.logger.warning('Failed to update product through GraphQL for %s: %s', shop, exc)
         return jsonify({'error': 'Failed to update product.'}), 400
+    errors = ((data.get('productUpdate') or {}).get('userErrors')) or []
+    if errors:
+        return jsonify({'error': '; '.join(err.get('message', 'Failed to update product.') for err in errors)}), 400
     increment_usage(shop_key)
     return jsonify({'success': True})
 
 
-ADMIN_SECRET = os.environ.get('ADMIN_SECRET', 'aiready-admin-2025')
+ADMIN_SECRET = os.environ.get('ADMIN_SECRET', '')
 
 @app.route('/request-unlock', methods=['POST'])
 def request_unlock():
@@ -3078,18 +3618,13 @@ def request_unlock():
 def admin_unlock():
     """Admin endpoint to manually unlock a shop after verifying payment."""
     secret = request.headers.get('X-Admin-Secret', '')
-    if secret != ADMIN_SECRET:
+    if not ADMIN_SECRET or secret != ADMIN_SECRET:
         return jsonify({'error': 'Unauthorized'}), 401
     data = request.get_json()
     shop = data.get('shop', '').strip().lower()
     if not shop:
         return jsonify({'error': 'shop required'}), 400
-    db_execute('''INSERT INTO paid_shops (shop, paypal_txn_id, paid_at)
-        VALUES (?, ?, datetime('now'))
-        ON CONFLICT(shop) DO UPDATE SET
-            paypal_txn_id=excluded.paypal_txn_id,
-            paid_at=datetime('now')
-    ''', (shop, 'manual'))
+    mark_shop_paid(shop, 'manual')
     return jsonify({'success': True, 'shop': shop})
 
 
@@ -3097,10 +3632,179 @@ def admin_unlock():
 def admin_requests():
     """List pending unlock requests."""
     secret = request.headers.get('X-Admin-Secret', '')
-    if secret != ADMIN_SECRET:
+    if not ADMIN_SECRET or secret != ADMIN_SECRET:
         return jsonify({'error': 'Unauthorized'}), 401
     rows = db_execute('SELECT id, email, shop, created_at FROM unlock_requests ORDER BY created_at DESC', fetchall=True)
     return jsonify([{'id': r[0], 'email': r[1], 'shop': r[2], 'created_at': r[3]} for r in rows])
+
+
+@app.route('/admin/metrics', methods=['GET'])
+def admin_metrics():
+    secret = request.headers.get('X-Admin-Secret', '')
+    if not ADMIN_SECRET or secret != ADMIN_SECRET:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    total_scans = db_execute('SELECT COUNT(*) FROM scan_events', fetchone=True)[0]
+    unique_scanned_shops = db_execute('SELECT COUNT(DISTINCT shop) FROM scan_events', fetchone=True)[0]
+    total_leads = db_execute('SELECT COUNT(*) FROM subscriptions', fetchone=True)[0]
+    unique_lead_shops = db_execute('SELECT COUNT(DISTINCT shop) FROM subscriptions', fetchone=True)[0]
+    paid_shops = db_execute('SELECT COUNT(*) FROM paid_shops', fetchone=True)[0]
+    pending_unlocks = db_execute('SELECT COUNT(*) FROM unlock_requests', fetchone=True)[0]
+    suppressed_emails = db_execute('SELECT COUNT(*) FROM email_suppression', fetchone=True)[0]
+    total_lead_events = db_execute('SELECT COUNT(*) FROM lead_events', fetchone=True)[0]
+
+    top_sources = db_execute('''
+        SELECT COALESCE(NULLIF(source, ''), 'direct') AS source, COUNT(*) AS scans
+        FROM scan_events
+        GROUP BY COALESCE(NULLIF(source, ''), 'direct')
+        ORDER BY scans DESC
+        LIMIT 10
+    ''', fetchall=True)
+    top_lead_sources = db_execute('''
+        SELECT COALESCE(NULLIF(source, ''), 'direct') AS source, COUNT(*) AS leads
+        FROM lead_events
+        GROUP BY COALESCE(NULLIF(source, ''), 'direct')
+        ORDER BY leads DESC
+        LIMIT 10
+    ''', fetchall=True)
+    recent_scans = db_execute('''
+        SELECT shop, source, avg_score, total_products, created_at
+        FROM scan_events
+        ORDER BY id DESC
+        LIMIT 20
+    ''', fetchall=True)
+    recent_leads = db_execute('''
+        SELECT email, shop, source, avg_score, total_products, created_at
+        FROM lead_events
+        ORDER BY id DESC
+        LIMIT 20
+    ''', fetchall=True)
+
+    lead_rate = round((total_leads / total_scans) * 100, 1) if total_scans else 0
+    paid_rate = round((paid_shops / unique_scanned_shops) * 100, 1) if unique_scanned_shops else 0
+
+    return jsonify({
+        'summary': {
+            'total_scans': total_scans,
+            'unique_scanned_shops': unique_scanned_shops,
+            'total_leads': total_leads,
+            'total_lead_events': total_lead_events,
+            'unique_lead_shops': unique_lead_shops,
+            'paid_shops': paid_shops,
+            'pending_unlocks': pending_unlocks,
+            'suppressed_emails': suppressed_emails,
+            'lead_rate_percent': lead_rate,
+            'paid_shop_rate_percent': paid_rate,
+        },
+        'top_sources': [{'source': r[0], 'scans': r[1]} for r in top_sources],
+        'top_lead_sources': [{'source': r[0], 'leads': r[1]} for r in top_lead_sources],
+        'recent_scans': [
+            {'shop': r[0], 'source': r[1] or 'direct', 'avg_score': r[2], 'total_products': r[3], 'created_at': r[4]}
+            for r in recent_scans
+        ],
+        'recent_leads': [
+            {
+                'email': r[0],
+                'shop': r[1],
+                'source': r[2] or 'direct',
+                'avg_score': r[3],
+                'total_products': r[4],
+                'created_at': r[5],
+            }
+            for r in recent_leads
+        ],
+    })
+
+
+@app.route('/admin/leads', methods=['GET'])
+def admin_leads():
+    secret = request.headers.get('X-Admin-Secret', '')
+    if not ADMIN_SECRET or secret != ADMIN_SECRET:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    limit_raw = request.args.get('limit', '100')
+    try:
+        limit = min(max(int(limit_raw), 1), 500)
+    except ValueError:
+        limit = 100
+
+    rows = db_execute('''
+        SELECT le.email, le.shop, le.source, le.avg_score, le.total_products, le.created_at,
+               CASE WHEN ps.shop IS NULL THEN 0 ELSE 1 END AS paid
+        FROM lead_events le
+        LEFT JOIN paid_shops ps ON ps.shop = le.shop
+        ORDER BY le.id DESC
+        LIMIT ?
+    ''', (limit * 3,), fetchall=True)
+
+    deduped = {}
+    for row in rows:
+        key = (row[0], row[1])
+        if key in deduped:
+            continue
+        avg_score = int(row[3] or 0)
+        total_products = int(row[4] or 0)
+        paid = bool(row[6])
+        deduped[key] = {
+            'email': row[0],
+            'shop': row[1],
+            'source': row[2] or 'direct',
+            'avg_score': avg_score,
+            'total_products': total_products,
+            'paid': paid,
+            'priority': lead_priority(avg_score, total_products, paid),
+            'created_at': row[5],
+        }
+        if len(deduped) >= limit:
+            break
+
+    leads = sorted(
+        deduped.values(),
+        key=lambda item: (
+            {'high': 0, 'medium': 1, 'low': 2}.get(item['priority'], 3),
+            item['paid'],
+            item['avg_score'] or 999,
+            -(item['total_products'] or 0),
+        )
+    )
+
+    if request.args.get('format') == 'csv':
+        out = io.StringIO()
+        fields = ['priority', 'email', 'shop', 'source', 'avg_score', 'total_products', 'paid', 'created_at']
+        writer = csv.DictWriter(out, fieldnames=fields)
+        writer.writeheader()
+        for lead in leads:
+            writer.writerow({field: lead.get(field, '') for field in fields})
+        return Response(
+            out.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': 'attachment; filename=aiready-leads.csv'},
+        )
+
+    return jsonify({'count': len(leads), 'leads': leads})
+
+
+@app.route('/unsubscribe', methods=['GET'])
+def unsubscribe():
+    email = request.args.get('email', '').strip().lower()
+    token = request.args.get('token', '').strip()
+    ok = email and is_valid_email(email) and hmac.compare_digest(token, unsubscribe_token(email))
+    if not ok:
+        return render_template_string("""
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Invalid unsubscribe link - AiReady</title>
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F6F6F7;color:#202223;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px}.box{background:#fff;border:1px solid #E4E5E7;border-radius:8px;max-width:460px;padding:28px;text-align:center}h1{font-size:20px;margin:0 0 8px}p{color:#6D7175;line-height:1.6}</style>
+</head><body><div class="box"><h1>Invalid unsubscribe link</h1><p>This link is missing or expired. You can reply to any AiReady email and ask to unsubscribe.</p><a href="/app" style="color:#008060;">Back to AiReady</a></div></body></html>
+"""), 400
+    suppress_email(email, 'unsubscribe')
+    return render_template_string("""
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Unsubscribed - AiReady</title>
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F6F6F7;color:#202223;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px}.box{background:#fff;border:1px solid #AEE9D1;border-radius:8px;max-width:460px;padding:28px;text-align:center}h1{font-size:20px;margin:0 0 8px;color:#005E45}p{color:#6D7175;line-height:1.6}</style>
+</head><body><div class="box"><h1>You are unsubscribed</h1><p>{{ email }} will no longer receive AiReady scan reports or weekly score emails.</p><a href="/app" style="color:#008060;">Back to AiReady</a></div></body></html>
+""", email=email)
 
 
 @app.route('/subscribe', methods=['POST'])
@@ -3110,14 +3814,24 @@ def subscribe():
     shop = data.get('shop', '').strip().lower()
     summary = data.get('summary') if isinstance(data.get('summary'), dict) else {}
     products = data.get('products') if isinstance(data.get('products'), list) else []
+    source = clean_source(data.get('source', '') or request.args.get('source', ''))
     if not email or not shop:
         return jsonify({'error': 'Email and shop required.'}), 400
     if not is_valid_email(email):
         return jsonify({'error': 'Please enter a valid email.'}), 400
+    if is_suppressed_email(email):
+        return jsonify({'error': 'This email has unsubscribed from AiReady reports.'}), 400
     try:
         db_execute('''INSERT INTO subscriptions (email, shop) VALUES (?, ?)
             ON CONFLICT(email, shop) DO NOTHING
         ''', (email, shop))
+        record_lead_event(
+            email,
+            shop,
+            source,
+            summary.get('avg_score') or 0,
+            summary.get('total_products') or len(products),
+        )
         sent = send_scan_report_email(email, shop, summary, products)
         return jsonify({'success': True, 'sent': sent})
     except Exception as e:
@@ -3128,7 +3842,7 @@ def subscribe():
 def run_weekly_scan():
     """Called by external cron job weekly. Scans all subscribed shops and emails reports."""
     secret = request.headers.get('X-Cron-Secret', '')
-    if secret != CRON_SECRET:
+    if not CRON_SECRET or secret != CRON_SECRET:
         return jsonify({'error': 'Unauthorized'}), 401
 
     subs = db_execute('SELECT id, email, shop, last_score FROM subscriptions', fetchall=True)
@@ -3160,6 +3874,7 @@ def run_weekly_scan():
             delta_str = f"+{delta}" if delta > 0 else str(delta)
 
             # Build email HTML
+            unsub_url = html.escape(unsubscribe_url(email))
             rows = ''.join(
                 f"<tr><td style='padding:8px;border-bottom:1px solid #eee;'>{r['name'][:50]}</td>"
                 f"<td style='padding:8px;border-bottom:1px solid #eee;color:{'#008060' if r['score']>=70 else '#B98900' if r['score']>=40 else '#D72C0D'};font-weight:600;'>{r['score']}/100</td>"
@@ -3187,10 +3902,10 @@ def run_weekly_scan():
       <tbody>{rows}</tbody>
     </table>
     <div style="margin-top:24px;text-align:center;">
-      <a href="https://aiready-checker.onrender.com/?shop={shop}" style="background:#008060;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px;">View Full Report</a>
+      <a href="{APP_BASE_URL}/app?url={shop}&source=weekly_report" style="background:#008060;color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;font-size:14px;">View Full Report</a>
     </div>
     <p style="margin-top:20px;font-size:12px;color:#8C9196;text-align:center;">
-      You're receiving this because you subscribed at aiready-checker.onrender.com
+      You're receiving this because you subscribed at {APP_BASE_URL}. <a href="{unsub_url}" style="color:#8C9196;">Unsubscribe</a>
     </p>
   </div>
 </div>"""

@@ -9,6 +9,12 @@ services:
         value: 3.11.0
       - key: DATABASE_URL
         sync: false
+      - key: FLASK_SECRET
+        generateValue: true
+      - key: ADMIN_SECRET
+        sync: false
+      - key: CRON_SECRET
+        sync: false
       - key: APP_BASE_URL
         value: https://aiready-checker.onrender.com
       - key: PAYPAL_HOSTED_BUTTON_ID
@@ -17,5 +23,23 @@ services:
         sync: false
       - key: REPORT_FROM_EMAIL
         sync: false
+      - key: SHOPIFY_BILLING_TEST
+        value: "false"
+      - key: SHOPIFY_BILLING_NAME
+        value: AiReady Unlimited
       - key: USD_PRICE
         value: "9"
+
+  - type: cron
+    name: aiready-weekly-report
+    env: python
+    schedule: "0 9 * * MON"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run_weekly_report.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: APP_BASE_URL
+        value: https://aiready-checker.onrender.com
+      - key: CRON_SECRET
+        sync: false
