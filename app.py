@@ -812,7 +812,7 @@ HTML_TEMPLATE = """
 
   <div class="scan-card">
     <form class="scan-row" id="scanForm">
-      <input type="text" class="scan-input" id="storeUrl" name="url" placeholder="yourstore.myshopify.com or yourstore.com" value="{{ prefill_url or '' }}" />
+      <input type="text" class="scan-input" id="storeUrl" name="url" placeholder="yourstore.myshopify.com or yourstore.com" value="{{ prefill_url or shop_prefill or '' }}" />
       <button type="submit" class="btn-primary" id="scanBtn">Scan Store</button>
     </form>
   </div>
@@ -1096,6 +1096,11 @@ if (document.readyState === 'loading') {
 
 <script>
 function runShopScan() {
+  var input = document.getElementById('storeUrl');
+  var label = document.getElementById('shopLabel');
+  if (input && !input.value.trim() && label && label.textContent.trim()) {
+    input.value = label.textContent.trim();
+  }
   runScan();
 }
 
@@ -1974,7 +1979,7 @@ window.runScan = runScan;
 function initScanApp() {
   var params = new URLSearchParams(window.location.search);
   var urlParam = params.get('url');
-  var shop = params.get('shop');
+  var shop = params.get('shop') || {{ shop_prefill|tojson }};
   var storeInput = document.getElementById('storeUrl');
   if (shop && storeInput) {
     var banner = document.getElementById('shopBanner');
@@ -2020,7 +2025,8 @@ function initPaywallApp() {
       storeInput.value = shop;
       var storeEl = document.getElementById('upgradeStoreUrl');
       if (storeEl) storeEl.value = shop;
-      document.getElementById('paypalShop').value = shop;
+      var paypalShop = document.getElementById('paypalShop');
+      if (paypalShop) paypalShop.value = shop;
     }
     closeUpgradeModal();
     if (shop && !document.getElementById('results').innerHTML) runScan();

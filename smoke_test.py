@@ -51,10 +51,14 @@ def test_pages(mod):
     embedded_paid = client.get("/app?shop=embedded-paid.myshopify.com&upgrade=1").get_data(as_text=True)
     assert_true("Approve charge in Shopify" in embedded_paid, "Shopify billing missing for installed app")
     assert_true("PayPal" not in embedded_paid, "PayPal was rendered inside installed Shopify app")
+    assert_true('value="embedded-paid.myshopify.com"' in embedded_paid, "embedded Shopify app did not prefill shop")
     upgrade_paid = client.get("/upgrade?shop=embedded-paid.myshopify.com").get_data(as_text=True)
     assert_true("PayPal" not in upgrade_paid, "PayPal was rendered inside Shopify upgrade page")
+    with client.session_transaction() as sess:
+        sess["shop"] = "embedded-paid.myshopify.com"
     host_only = client.get("/app?host=embedded-host&upgrade=1").get_data(as_text=True)
     assert_true("PayPal" not in host_only, "PayPal was rendered for Shopify host context")
+    assert_true("embedded-paid.myshopify.com" in host_only, "host-only Shopify app did not use session shop")
 
 
 def test_admin_requires_configured_secret(mod):
