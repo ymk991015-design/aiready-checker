@@ -48,6 +48,10 @@ def test_pages(mod):
     embedded_paid = client.get("/app?shop=embedded-paid.myshopify.com&upgrade=1").get_data(as_text=True)
     assert_true("Approve charge in Shopify" in embedded_paid, "Shopify billing missing for installed app")
     assert_true("PayPal" not in embedded_paid, "PayPal was rendered inside installed Shopify app")
+    upgrade_paid = client.get("/upgrade?shop=embedded-paid.myshopify.com").get_data(as_text=True)
+    assert_true("PayPal" not in upgrade_paid, "PayPal was rendered inside Shopify upgrade page")
+    host_only = client.get("/app?host=embedded-host&upgrade=1").get_data(as_text=True)
+    assert_true("PayPal" not in host_only, "PayPal was rendered for Shopify host context")
 
 
 def test_admin_requires_configured_secret(mod):

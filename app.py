@@ -1061,6 +1061,13 @@ function bindPaywallButtons() {
   if (confirmBtn) confirmBtn.addEventListener('click', function(e) { e.preventDefault(); submitUnlockRequest(); });
   if (shopifyBilling) shopifyBilling.addEventListener('click', function(e) { e.preventDefault(); startShopifyBilling(); });
   if (modal) modal.addEventListener('click', function(e) { if (e.target === modal) closeUpgradeModal(); });
+  try {
+    var params = new URLSearchParams(window.location.search);
+    if (window.top !== window.self || params.get('host')) {
+      window.currentShopHasToken = true;
+      setBillingMode(true);
+    }
+  } catch(e) {}
   if (modal && modal.classList.contains('visible')) refreshBillingMode(getPaywallShop());
 }
 if (document.readyState === 'loading') {
@@ -2974,9 +2981,13 @@ def terms():
 def index():
     return render_template_string(LANDING_TEMPLATE)
 
-def _render_app_page(open_upgrade=False, shop_prefill='', url_param=''):
+def _render_app_page(open_upgrade=False, shop_prefill='', url_param='', shopify_app_context=False):
     normalized_prefill = normalize_shop(shop_prefill)
-    shopify_app_context = bool(normalized_prefill and is_valid_shop(normalized_prefill))
+    shopify_app_context = bool(
+        shopify_app_context
+        or (normalized_prefill and is_valid_shop(normalized_prefill))
+        or request.args.get('host')
+    )
     return render_template_string(
         HTML_TEMPLATE,
         prefill_url=url_param,
@@ -2992,15 +3003,19 @@ def _render_app_page(open_upgrade=False, shop_prefill='', url_param=''):
 
 @app.route('/upgrade')
 def upgrade_page():
-    shop = normalize_shop(request.args.get('shop', ''))
-    return _render_app_page(open_upgrade=True, shop_prefill=shop)
+    shop = normalize_shop(request.args.get('shop', session.get('shop', '')))
+    return _render_app_page(
+        open_upgrade=True,
+        shop_prefill=shop,
+        shopify_app_context=bool(request.args.get('host')),
+    )
 
 
 @app.route('/app')
 def app_page():
     url_param = request.args.get('url', '')
     open_upgrade = request.args.get('upgrade') == '1'
-    shop_prefill = normalize_shop(request.args.get('shop', ''))
+    shop_prefill = normalize_shop(request.args.get('shop', session.get('shop', '')))
     if shop_prefill and is_valid_shop(shop_prefill) and not has_shop_token(shop_prefill):
         install_params = {'shop': shop_prefill}
         host = request.args.get('host', '')
@@ -3011,6 +3026,7 @@ def app_page():
         open_upgrade=open_upgrade,
         shop_prefill=shop_prefill,
         url_param=url_param,
+        shopify_app_context=bool(request.args.get('host')),
     )
 
 @app.route('/scan', methods=['POST'])
