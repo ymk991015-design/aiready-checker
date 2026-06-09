@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import time
+from urllib.parse import parse_qs, urlencode, urlparse
 from unittest.mock import patch
 
 
@@ -33,6 +34,11 @@ def make_shopify_session_token(client_id, secret, shop):
     signed = f"{header}.{payload}".encode("utf-8")
     sig = base64.urlsafe_b64encode(hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).digest()).decode("utf-8").rstrip("=")
     return f"{header}.{payload}.{sig}"
+
+
+def shopify_hmac(params, secret):
+    message = "&".join(f"{key}={params[key]}" for key in sorted(params))
+    return hmac.new(secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def fresh_app():
@@ -183,6 +189,48 @@ def test_shopify_billing(mod):
     assert_true(res.get_json().get("confirmationUrl"), "billing confirmationUrl missing")
 
 
+def test_oauth_signed_state_without_cookie(mod):
+    client = mod.app.test_client()
+    install = client.get("/install?shop=oauth-demo.myshopify.com")
+    assert_true(install.status_code == 302, "install did not redirect to Shopify OAuth")
+    state = parse_qs(urlparse(install.headers["Location"]).query)["state"][0]
+
+    params = {
+        "shop": "oauth-demo.myshopify.com",
+        "code": "oauth-code",
+        "state": state,
+        "timestamp": "123",
+    }
+    params["hmac"] = shopify_hmac(params, "smoke-secret")
+
+    class Resp:
+        def __init__(self, payload, status_code=200):
+            self._payload = payload
+            self.status_code = status_code
+            self.text = json.dumps(payload)
+
+        def json(self):
+            return self._payload
+
+    def fake_post(url, **kwargs):
+        if url.endswith("/admin/oauth/access_token"):
+            return Resp({"access_token": "oauth-token", "scope": "read_products,write_products"})
+        return Resp({
+            "data": {
+                "webhookSubscriptionCreate": {
+                    "webhookSubscription": {"id": "gid://shopify/WebhookSubscription/1"},
+                    "userErrors": [],
+                }
+            }
+        })
+
+    fresh_browser = mod.app.test_client()
+    with patch("app.requests.post", side_effect=fake_post):
+        callback = fresh_browser.get("/auth/callback?" + urlencode(params))
+    assert_true(callback.status_code == 302, f"OAuth callback failed without session cookie: {callback.status_code}")
+    assert_true("Invalid state parameter" not in callback.get_data(as_text=True), "signed OAuth state was rejected")
+
+
 def test_shopify_graphql_admin_api(mod):
     client = mod.app.test_client()
     mod.save_shop_token("graphql-demo.myshopify.com", "token", "read_products,write_products")
@@ -289,6 +337,7 @@ def main():
         test_subscribe_unsubscribe_metrics,
         test_webhooks,
         test_shopify_billing,
+        test_oauth_signed_state_without_cookie,
         test_shopify_graphql_admin_api,
     ]
     for test in tests:

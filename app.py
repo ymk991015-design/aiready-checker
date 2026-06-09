@@ -334,6 +334,39 @@ def normalize_shop(shop):
 def is_valid_shop(shop):
     return bool(re.fullmatch(r'[a-z0-9][a-z0-9-]*\.myshopify\.com', shop or ''))
 
+def _b64url_encode(value):
+    if not isinstance(value, bytes):
+        value = value.encode('utf-8')
+    return base64.urlsafe_b64encode(value).decode('utf-8').rstrip('=')
+
+def create_oauth_state(shop):
+    payload = {
+        'shop': normalize_shop(shop),
+        'iat': int(time.time()),
+        'nonce': _b64url_encode(os.urandom(16)),
+    }
+    body = _b64url_encode(json.dumps(payload, separators=(',', ':'), sort_keys=True))
+    sig = hmac.new(SHOPIFY_CLIENT_SECRET.encode('utf-8'), body.encode('utf-8'), hashlib.sha256).digest()
+    return f'{body}.{_b64url_encode(sig)}'
+
+def verify_oauth_state(state, shop, max_age=600):
+    if not state or not SHOPIFY_CLIENT_SECRET:
+        return False
+    try:
+        body, sig = state.split('.', 1)
+        expected = hmac.new(SHOPIFY_CLIENT_SECRET.encode('utf-8'), body.encode('utf-8'), hashlib.sha256).digest()
+        actual = _b64url_decode(sig)
+        if not hmac.compare_digest(expected, actual):
+            return False
+        payload = json.loads(_b64url_decode(body).decode('utf-8'))
+        if normalize_shop(payload.get('shop', '')) != normalize_shop(shop):
+            return False
+        issued_at = int(payload.get('iat', 0))
+        now = int(time.time())
+        return now - max_age <= issued_at <= now + 30
+    except Exception:
+        return False
+
 def verify_shopify_hmac(args):
     incoming_hmac = args.get('hmac', '')
     if not incoming_hmac or not SHOPIFY_CLIENT_SECRET:
@@ -990,7 +1023,20 @@ async function verifyEmbeddedSessionToken() {
   try {
     var token = await getShopifySessionToken();
     if (!token) return;
-    await appFetch('/api/session-token-check', {method: 'POST'});
+    var res = await appFetch('/api/session-token-check', {method: 'POST'});
+    var data = await res.json();
+    if (data && data.shop) {
+      window.currentShopHasToken = true;
+      var storeInput = document.getElementById('storeUrl');
+      var upgradeInput = document.getElementById('upgradeStoreUrl');
+      var banner = document.getElementById('shopBanner');
+      var label = document.getElementById('shopLabel');
+      if (storeInput && !storeInput.value.trim()) storeInput.value = data.shop;
+      if (upgradeInput && !upgradeInput.value.trim()) upgradeInput.value = data.shop;
+      if (label) label.textContent = data.shop;
+      if (banner) banner.classList.add('visible');
+      setBillingMode(true);
+    }
   } catch (e) {}
 }
 async function refreshBillingMode(shop) {
@@ -3464,7 +3510,7 @@ def install():
         return 'Shopify app credentials are not configured.', 500
     if has_shop_token(shop):
         return redirect(f'/app?shop={shop}')
-    state = base64.b64encode(os.urandom(16)).decode('utf-8')
+    state = create_oauth_state(shop)
     session['oauth_state'] = state
     params = {
         'client_id': SHOPIFY_CLIENT_ID,
@@ -3486,8 +3532,8 @@ def auth_callback():
         return 'Invalid shop parameter.', 400
     if not verify_shopify_hmac(request.args):
         return 'Invalid HMAC signature.', 403
-    # Verify state
-    if state != session.get('oauth_state', ''):
+    # Verify signed state. Keep the session fallback for older in-flight installs.
+    if not verify_oauth_state(state, shop) and state != session.get('oauth_state', ''):
         return 'Invalid state parameter.', 403
     if not code:
         return 'Missing authorization code.', 400
