@@ -585,6 +585,12 @@ HTML_TEMPLATE = """
     .topbar-logo { font-size: 16px; font-weight: 700; color: #fff; letter-spacing: -0.3px; }
     .topbar-logo span { color: #95BF47; }
     .topbar-badge { font-size: 11px; background: rgba(149,191,71,0.2); color: #95BF47; border: 1px solid rgba(149,191,71,0.4); padding: 3px 10px; border-radius: 20px; font-weight: 600; }
+    .topbar-links { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+    .topbar-link { color: #D2D5D8; text-decoration: none; font-size: 13px; }
+    .topbar-link:hover { color: #fff; }
+    .app-legal-footer { max-width: 900px; margin: -32px auto 32px; padding: 0 24px; display: flex; justify-content: center; gap: 18px; font-size: 13px; }
+    .app-legal-footer a { color: var(--text-sub); text-decoration: none; }
+    .app-legal-footer a:hover { color: var(--green); }
 
     /* PAGE */
     .page { max-width: 900px; margin: 0 auto; padding: 24px 24px 60px; }
@@ -776,6 +782,8 @@ HTML_TEMPLATE = """
       .page { padding: 16px 16px 40px; }
       .opportunity-body { grid-template-columns: 1fr; }
       .preview-grid { grid-template-columns: 1fr; }
+      .topbar-links { gap: 10px; }
+      .topbar-link { font-size: 12px; }
     }
   </style>
 </head>
@@ -784,6 +792,10 @@ HTML_TEMPLATE = """
 <div class="topbar">
   <a href="/" style="text-decoration:none;"><div class="topbar-logo">Ai<span>Ready</span></div></a>
   <div class="topbar-badge">AI Readiness Checker</div>
+  <div class="topbar-links">
+    <a class="topbar-link" href="/privacy">Privacy</a>
+    <a class="topbar-link" href="/terms">Terms</a>
+  </div>
 </div>
 
 <div class="page">
@@ -825,7 +837,7 @@ HTML_TEMPLATE = """
     <div class="modal-price-sub" id="billingSubtitle">{% if shopify_app_context %}one-time via Shopify billing - unlimited forever{% else %}one-time via PayPal - unlimited forever{% endif %}</div>
     <div class="pay-store-row">
       <label class="pay-amount-label">店铺域名 Store URL <span style="color:#D72C0D">*</span></label>
-      <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="document.getElementById('paypalShop').value=this.value" />
+      <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="var paypalShop=document.getElementById('paypalShop'); if (paypalShop) paypalShop.value=this.value" />
     </div>
     <div class="modal-features">
       <div class="modal-feature">&#10003; &nbsp; Unlimited AI description generation</div>
@@ -867,6 +879,11 @@ HTML_TEMPLATE = """
     {% endif %}
     <button type="button" id="btnMaybeLater" class="modal-close">Maybe later</button>
   </div>
+</div>
+
+<div class="app-legal-footer">
+  <a href="/privacy">Privacy Policy</a>
+  <a href="/terms">Terms of Service</a>
 </div>
 
 <script>
@@ -2332,6 +2349,8 @@ LANDING_TEMPLATE = """
     .nav-logo { font-size:18px; font-weight:800; letter-spacing:-0.5px; }
     .nav-logo span { color:#95BF47; }
     .nav-right { display:flex; align-items:center; gap:16px; }
+    .nav-link { color:var(--text-sub); font-size:13px; text-decoration:none; font-weight:600; }
+    .nav-link:hover { color:var(--green); }
     .lang-btn { font-size:13px; color:var(--text-sub); background:none; border:1px solid var(--border); padding:5px 12px; border-radius:20px; cursor:pointer; }
     .lang-btn:hover { border-color:#aaa; }
     .btn-nav { background:var(--green); color:#fff; border:none; padding:8px 20px; border-radius:6px; font-size:14px; font-weight:600; cursor:pointer; text-decoration:none; display:inline-block; }
@@ -2450,6 +2469,8 @@ LANDING_TEMPLATE = """
 <nav>
   <div class="nav-logo">Ai<span>Ready</span></div>
   <div class="nav-right">
+    <a href="/privacy" class="nav-link">Privacy</a>
+    <a href="/terms" class="nav-link">Terms</a>
     <button class="lang-btn" onclick="toggleLang()">
       <span class="en">中文</span>
       <span class="zh">English</span>
