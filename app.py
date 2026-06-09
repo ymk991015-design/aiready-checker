@@ -524,6 +524,80 @@ def shopify_graphql(shop, access_token, query, variables=None):
         raise RuntimeError(json.dumps(data['errors'])[:500])
     return data.get('data') or {}
 
+def fetch_shopify_admin_products(shop, limit=20):
+    shop = normalize_shop(shop)
+    token = get_shop_token(shop)
+    if not shop or not token:
+        return []
+    query = """
+    query AiReadyProducts($first: Int!) {
+      products(first: $first) {
+        edges {
+          node {
+            id
+            legacyResourceId
+            title
+            handle
+            vendor
+            descriptionHtml
+            onlineStoreUrl
+            featuredMedia {
+              preview {
+                image {
+                  url
+                }
+              }
+            }
+            options {
+              name
+              values
+            }
+            variants(first: 20) {
+              edges {
+                node {
+                  id
+                  legacyResourceId
+                  sku
+                  barcode
+                  price
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    data = shopify_graphql(shop, token, query, {'first': limit})
+    products = []
+    for edge in (((data.get('products') or {}).get('edges')) or []):
+        node = edge.get('node') or {}
+        image_url = (((node.get('featuredMedia') or {}).get('preview') or {}).get('image') or {}).get('url')
+        variants = []
+        for variant_edge in (((node.get('variants') or {}).get('edges')) or []):
+            variant = variant_edge.get('node') or {}
+            variants.append({
+                'id': str(variant.get('legacyResourceId') or variant.get('id') or ''),
+                'admin_graphql_api_id': variant.get('id', ''),
+                'sku': variant.get('sku') or '',
+                'barcode': variant.get('barcode') or '',
+                'price': str(variant.get('price') or ''),
+                'available': True,
+            })
+        products.append({
+            'id': str(node.get('legacyResourceId') or node.get('id') or ''),
+            'admin_graphql_api_id': node.get('id', ''),
+            'title': node.get('title') or '',
+            'handle': node.get('handle') or '',
+            'vendor': node.get('vendor') or '',
+            'body_html': node.get('descriptionHtml') or '',
+            'online_store_url': node.get('onlineStoreUrl') or '',
+            'images': [{'src': image_url}] if image_url else [],
+            'options': node.get('options') or [],
+            'variants': variants,
+        })
+    return products
+
 def mark_shop_paid(shop, source):
     db_execute('''INSERT INTO paid_shops (shop, paypal_txn_id, paid_at)
         VALUES (?, ?, datetime('now'))
@@ -3191,9 +3265,25 @@ def scan():
     source = clean_source(data.get('source', '') or request.args.get('source', ''))
     if not store_url:
         return jsonify({'error': 'Please provide a store URL.'})
-    product_urls, shopify_products = get_product_urls(store_url)
+    normalized_shop = normalize_shop(store_url)
+    shopify_products = []
+    product_urls = []
+    if normalized_shop and is_valid_shop(normalized_shop) and has_shop_token(normalized_shop):
+        try:
+            shopify_products = fetch_shopify_admin_products(normalized_shop)
+            for product in shopify_products:
+                handle = product.get('handle', '')
+                url = product.get('online_store_url') or (f'https://{normalized_shop}/products/{handle}' if handle else '')
+                if url:
+                    product_urls.append(url)
+        except Exception as exc:
+            app.logger.warning('Falling back to storefront scan for %s: %s', normalized_shop, exc)
+            shopify_products = []
+            product_urls = []
     if not product_urls:
-        return jsonify({'error': 'Could not find products. Make sure the store URL is correct and the store is live.'})
+        product_urls, shopify_products = get_product_urls(store_url)
+    if not product_urls:
+        return jsonify({'error': 'Could not find products. Make sure the store has products available to this app.'})
     product_by_handle = {p.get('handle', ''): p for p in shopify_products if p.get('handle')}
 
     def scan_one(url):
@@ -3616,81 +3706,13 @@ def webhook_shop_redact():
 def api_products():
     """Fetch products directly from Shopify GraphQL Admin API using stored token."""
     shop = normalize_shop(request.args.get('shop', session.get('shop', '')))
-    token = get_shop_token(shop)
-    if not shop or not token:
+    if not shop or not get_shop_token(shop):
         return jsonify({'error': 'Not authenticated. Please install the app first.'}), 401
-    query = """
-    query AiReadyProducts {
-      products(first: 20) {
-        edges {
-          node {
-            id
-            legacyResourceId
-            title
-            handle
-            vendor
-            descriptionHtml
-            onlineStoreUrl
-            featuredMedia {
-              preview {
-                image {
-                  url
-                }
-              }
-            }
-            options {
-              name
-              values
-            }
-            variants(first: 20) {
-              edges {
-                node {
-                  id
-                  legacyResourceId
-                  sku
-                  barcode
-                  price
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    """
     try:
-        data = shopify_graphql(shop, token, query)
+        products = fetch_shopify_admin_products(shop)
     except Exception as exc:
         app.logger.warning('Failed to fetch products through GraphQL for %s: %s', shop, exc)
         return jsonify({'error': 'Failed to fetch products from Shopify.'}), 400
-
-    products = []
-    for edge in (((data.get('products') or {}).get('edges')) or []):
-        node = edge.get('node') or {}
-        image_url = (((node.get('featuredMedia') or {}).get('preview') or {}).get('image') or {}).get('url')
-        variants = []
-        for variant_edge in (((node.get('variants') or {}).get('edges')) or []):
-            variant = variant_edge.get('node') or {}
-            variants.append({
-                'id': str(variant.get('legacyResourceId') or variant.get('id') or ''),
-                'admin_graphql_api_id': variant.get('id', ''),
-                'sku': variant.get('sku') or '',
-                'barcode': variant.get('barcode') or '',
-                'price': str(variant.get('price') or ''),
-                'available': True,
-            })
-        products.append({
-            'id': str(node.get('legacyResourceId') or node.get('id') or ''),
-            'admin_graphql_api_id': node.get('id', ''),
-            'title': node.get('title') or '',
-            'handle': node.get('handle') or '',
-            'vendor': node.get('vendor') or '',
-            'body_html': node.get('descriptionHtml') or '',
-            'online_store_url': node.get('onlineStoreUrl') or '',
-            'images': [{'src': image_url}] if image_url else [],
-            'options': node.get('options') or [],
-            'variants': variants,
-        })
     return jsonify({'products': products})
 
 

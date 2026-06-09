@@ -299,12 +299,15 @@ def test_shopify_graphql_admin_api(mod):
 
     with patch("app.requests.post", side_effect=fake_post):
         products = client.get("/api/products?shop=graphql-demo.myshopify.com")
+        scan = client.post("/scan", json={"url": "graphql-demo.myshopify.com"})
         vendor = client.post("/api/update_vendor", json={"shop": "graphql-demo.myshopify.com", "product_id": "123", "vendor": "New Brand"})
         description = client.post("/api/update_product", json={"shop": "graphql-demo.myshopify.com", "product_id": "123", "description": "<p>New copy</p>"})
         webhook_ok = mod.register_app_uninstalled_webhook("graphql-demo.myshopify.com", "token")
 
     assert_true(products.status_code == 200, f"GraphQL products failed {products.status_code}")
     assert_true(products.get_json()["products"][0]["admin_graphql_api_id"] == "gid://shopify/Product/123", "GraphQL product id missing")
+    assert_true(scan.status_code == 200, f"Admin-backed scan failed {scan.status_code}")
+    assert_true(scan.get_json()["summary"]["total_products"] == 1, "Admin-backed scan did not read products")
     assert_true(vendor.status_code == 200, f"GraphQL vendor update failed {vendor.status_code}")
     assert_true(description.status_code == 200, f"GraphQL description update failed {description.status_code}")
     assert_true(webhook_ok, "GraphQL webhook registration failed")
