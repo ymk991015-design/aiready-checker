@@ -1180,7 +1180,7 @@ window.renderResults = function renderResults(data) {
         el.innerHTML = '<span class="usage-badge paid">&#10003; Unlimited plan</span>';
       } else {
         const rem = u.remaining;
-        el.innerHTML = `<span class="usage-badge">${rem} free action${rem===1?'':'s'} remaining &mdash; <a href="#" onclick="showUpgradeModal(${jsArg(s.store)});return false;" style="color:var(--yellow);text-decoration:underline;">Upgrade $9</a></span>`;
+        el.innerHTML = `<span class="usage-badge">${rem} free action${rem===1?'':'s'} remaining &mdash; <a href="#" onclick="showUpgradeModal(${jsArg(s.store)});return false;" style="color:var(--yellow);text-decoration:underline;">View plan</a></span>`;
       }
     }).catch(() => {});
 
