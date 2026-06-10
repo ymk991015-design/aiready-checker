@@ -1091,8 +1091,8 @@ HTML_TEMPLATE = """
     </div>
     <div id="modalStep1">
       <div id="shopifyBillingBox" style="display:{% if shopify_app_context %}block{% else %}none{% endif %};margin-bottom:12px;">
-        <a id="btnShopifyBilling" href="/shopify/billing/approve?shop={{ shop_prefill|urlencode }}" target="_top" class="btn-primary" style="display:block;width:100%;padding:14px;font-size:15px;text-align:center;text-decoration:none;box-sizing:border-box;">Approve monthly plan in Shopify</a>
-        <div class="pay-amount-hint">For installed Shopify stores, payment is approved securely inside Shopify.</div>
+        <a id="btnShopifyBilling" href="/shopify/billing/approve?shop={{ shop_prefill|urlencode }}" target="_blank" rel="noopener" class="btn-primary" style="display:block;width:100%;padding:14px;font-size:15px;text-align:center;text-decoration:none;box-sizing:border-box;">Approve monthly plan in Shopify</a>
+        <div class="pay-amount-hint">Opens Shopify's secure billing approval page in a new tab.</div>
         <div id="billingError" style="display:none;margin-top:10px;color:#D72C0D;font-size:13px;line-height:1.45;"></div>
       </div>
       {% if not shopify_app_context %}
