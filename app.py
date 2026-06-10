@@ -1073,6 +1073,7 @@ HTML_TEMPLATE = """
       <div id="shopifyBillingBox" style="display:{% if shopify_app_context %}block{% else %}none{% endif %};margin-bottom:12px;">
         <button type="button" id="btnShopifyBilling" class="btn-primary" style="width:100%;padding:14px;font-size:15px;">Approve charge in Shopify</button>
         <div class="pay-amount-hint">For installed Shopify stores, payment is approved securely inside Shopify.</div>
+        <div id="billingError" style="display:none;margin-top:10px;color:#D72C0D;font-size:13px;line-height:1.45;"></div>
       </div>
       {% if not shopify_app_context %}
       <div id="paypalBillingBox">
@@ -1270,8 +1271,13 @@ async function handlePayPalSubmit(e) {
 }
 async function startShopifyBilling() {
   const shop = getPaywallShop();
+  const errorBox = document.getElementById('billingError');
+  if (errorBox) { errorBox.style.display = 'none'; errorBox.innerHTML = ''; }
   if (!shop) {
-    alert('Please enter your store URL first (e.g. yourstore.myshopify.com).');
+    if (errorBox) {
+      errorBox.style.display = 'block';
+      errorBox.textContent = 'Please enter your store URL first.';
+    }
     return;
   }
   const btn = document.getElementById('btnShopifyBilling');
@@ -1284,16 +1290,31 @@ async function startShopifyBilling() {
     });
     const data = await res.json();
     if (data.redirect) {
-      window.location.href = data.redirect;
+      if (errorBox) {
+        errorBox.style.display = 'block';
+        errorBox.innerHTML = scanEsc(data.error || 'Please reconnect AiReady to Shopify first.') +
+          '<div style="margin-top:10px;"><button type="button" class="btn-primary" onclick="window.top.location.href=' + jsArg(data.redirect) + '">Reconnect Shopify</button></div>';
+      }
+      if (btn) { btn.disabled = false; btn.textContent = 'Approve charge in Shopify'; }
       return;
     }
     if (data.confirmationUrl) {
-      window.top.location.href = data.confirmationUrl;
+      try {
+        window.open(data.confirmationUrl, '_top');
+      } catch (e) {
+        window.top.location.href = data.confirmationUrl;
+      }
       return;
     }
-    alert(data.error || 'Could not start Shopify billing.');
+    if (errorBox) {
+      errorBox.style.display = 'block';
+      errorBox.textContent = data.error || 'Could not start Shopify billing.';
+    }
   } catch(e) {
-    alert('Could not connect to Shopify billing. Please try again.');
+    if (errorBox) {
+      errorBox.style.display = 'block';
+      errorBox.textContent = 'Could not connect to Shopify billing. Please try again.';
+    }
   }
   if (btn) { btn.disabled = false; btn.textContent = 'Approve charge in Shopify'; }
 }
@@ -3535,9 +3556,19 @@ def paypal_ipn():
 def shopify_billing_start():
     data = request.get_json() or {}
     shop = normalize_shop(data.get('shop', session.get('shop', '')))
-    token = get_shop_token(shop)
+    try:
+        token = get_shop_token(shop)
+    except Exception as exc:
+        app.logger.warning('Failed to load Shopify token for billing %s: %s', shop, exc)
+        return jsonify({
+            'error': 'Please reconnect AiReady to Shopify before approving the charge.',
+            'redirect': f'/install?shop={shop}&force=1',
+        }), 401
     if not shop or not token:
-        return jsonify({'error': 'Install the Shopify app before upgrading through Shopify.'}), 401
+        return jsonify({
+            'error': 'Install or reconnect the Shopify app before upgrading through Shopify.',
+            'redirect': f'/install?shop={shop}&force=1' if shop else '',
+        }), 401
     if is_paid(shop) or sync_shopify_billing_status(shop):
         return jsonify({'success': True, 'already_paid': True, 'redirect': f'/app?shop={shop}&unlocked=1'})
 
@@ -3568,7 +3599,16 @@ def shopify_billing_start():
         return jsonify({'success': True, 'confirmationUrl': confirmation_url})
     except Exception as exc:
         app.logger.warning('Failed to create Shopify billing charge for %s: %s', shop, exc)
-        return jsonify({'error': 'Could not start Shopify billing. Please try again.'}), 500
+        if (
+            'GraphQL 401' in str(exc)
+            or 'GraphQL 403' in str(exc)
+            or 'Non-expiring access tokens' in str(exc)
+        ):
+            return jsonify({
+                'error': 'Please reconnect AiReady to Shopify before approving the charge.',
+                'redirect': f'/install?shop={shop}&force=1',
+            }), 401
+        return jsonify({'error': f'Could not start Shopify billing: {str(exc)[:220]}'}), 500
 
 
 @app.route('/shopify/billing/return')

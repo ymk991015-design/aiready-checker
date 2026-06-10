@@ -199,6 +199,18 @@ def test_shopify_billing(mod):
     assert_true(res.status_code == 200, f"billing start failed {res.status_code}")
     assert_true(res.get_json().get("confirmationUrl"), "billing confirmationUrl missing")
 
+    class RejectResp:
+        status_code = 403
+        text = '{"errors":"[API] Non-expiring access tokens are no longer accepted for the Admin API."}'
+
+        def json(self):
+            return {"errors": "[API] Non-expiring access tokens are no longer accepted for the Admin API."}
+
+    with patch("app.requests.post", return_value=RejectResp()):
+        rejected = client.post("/shopify/billing/start", json={"shop": "demo.myshopify.com"})
+    assert_true(rejected.status_code == 401, "billing did not request reconnect for rejected token")
+    assert_true(rejected.get_json().get("redirect") == "/install?shop=demo.myshopify.com&force=1", "billing reconnect redirect missing")
+
 
 def test_oauth_signed_state_without_cookie(mod):
     client = mod.app.test_client()
