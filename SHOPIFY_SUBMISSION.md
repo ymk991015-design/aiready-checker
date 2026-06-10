@@ -104,7 +104,7 @@ Required for PayPal unlock:
 ```text
 PAYPAL_HOSTED_BUTTON_ID
 PAYPAL_RECEIVER_EMAIL
-USD_PRICE=9
+USD_PRICE=9.99
 ```
 
 PayPal is for the standalone web scanner only. For installed Shopify stores, AiReady starts a Shopify monthly subscription through the GraphQL Admin API.

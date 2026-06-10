@@ -22,7 +22,7 @@ app.secret_key = os.environ.get('FLASK_SECRET') or os.urandom(32)
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 REPORT_FROM_EMAIL = os.environ.get('REPORT_FROM_EMAIL', 'AiReady <onboarding@resend.dev>')
 CRON_SECRET = os.environ.get('CRON_SECRET', '')
-USD_PRICE = float(os.environ.get('USD_PRICE', '9'))
+USD_PRICE = float(os.environ.get('USD_PRICE', '9.99'))
 SHOPIFY_MONTHLY_PRICE = float(os.environ.get('SHOPIFY_MONTHLY_PRICE', '9.99'))
 SHOPIFY_BILLING_TEST = os.environ.get('SHOPIFY_BILLING_TEST', '').lower() in ('1', 'true', 'yes')
 SHOPIFY_BILLING_NAME = os.environ.get('SHOPIFY_BILLING_NAME', 'AiReady Unlimited')
@@ -33,7 +33,8 @@ DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
 DB_PATH = os.environ.get('DB_PATH', os.path.join(tempfile.gettempdir(), 'aiready.db'))
 USE_POSTGRES = bool(DATABASE_URL)
 
-FREE_LIMIT = 5  # free AI actions per shop
+FREE_PRODUCT_LIMIT = 20
+PAID_PRODUCT_LIMIT = 250
 
 def display_price(value):
     try:
@@ -591,7 +592,7 @@ def shopify_graphql(shop, access_token, query, variables=None):
         raise RuntimeError(json.dumps(data['errors'])[:500])
     return data.get('data') or {}
 
-def fetch_shopify_admin_products(shop, limit=20):
+def fetch_shopify_admin_products(shop, limit=FREE_PRODUCT_LIMIT):
     shop = normalize_shop(shop)
     token = get_shop_token(shop)
     if not shop or not token:
@@ -1074,7 +1075,7 @@ HTML_TEMPLATE = """
 <div class="modal-overlay{% if open_upgrade %} visible{% endif %}" id="upgradeModal">
   <div class="modal-box">
     <div class="modal-icon">&#128274;</div>
-    <div class="modal-title">{% if open_upgrade %}Upgrade to Unlimited{% else %}You've used your 5 free actions{% endif %}</div>
+    <div class="modal-title">Upgrade to Unlimited</div>
     <div class="modal-sub">{% if shopify_app_context %}Monthly Shopify billing unlocks unlimited AI fixes, descriptions, and saves for your store.{% elif open_upgrade %}One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.{% else %}Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.{% endif %}</div>
     <div class="modal-price">{% if shopify_app_context %}${{ shopify_monthly_price }}{% else %}${{ paypal_price }}{% endif %}</div>
     <div class="modal-price-sub" id="billingSubtitle">{% if shopify_app_context %}per month via Shopify billing{% else %}one-time via PayPal - unlimited forever{% endif %}</div>
@@ -1166,7 +1167,7 @@ function setBillingMode(useShopify) {
   if (paidStep) paidStep.style.display = useShopify ? 'none' : 'block';
   if (subtitle) subtitle.textContent = useShopify
     ? 'per month via Shopify billing'
-    : '{% if shopify_app_context %}one-time - unlimited forever{% else %}one-time via PayPal - unlimited forever{% endif %}';
+    : '{% if shopify_app_context %}per month via Shopify billing{% else %}one-time via PayPal - unlimited forever{% endif %}';
 }
 async function getShopifySessionToken() {
   if (!window.shopify || typeof window.shopify.idToken !== 'function') return '';
@@ -1239,8 +1240,8 @@ function showUpgradeModal(shop) {
       title.textContent = 'Upgrade to Unlimited';
       sub.textContent = 'One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.';
     } else {
-      title.textContent = "You've used your 5 free actions";
-      sub.textContent = 'Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.';
+      title.textContent = 'Upgrade to Unlimited';
+      sub.textContent = 'Upgrade to scan more products and unlock unlimited AI fixes, descriptions, and saves for your store.';
     }
   }
   var step1 = document.getElementById('modalStep1');
@@ -1505,8 +1506,8 @@ window.renderResults = function renderResults(data) {
       if (u.paid) {
         el.innerHTML = '<span class="usage-badge paid">&#10003; Unlimited plan</span>';
       } else {
-        const rem = u.remaining;
-        el.innerHTML = `<span class="usage-badge">${rem} free action${rem===1?'':'s'} remaining &mdash; <a href="#" onclick="showUpgradeModal(${jsArg(s.store)});return false;" style="color:var(--yellow);text-decoration:underline;">View plan</a></span>`;
+        const limit = u.free_product_limit || 20;
+        el.innerHTML = `<span class="usage-badge">Free scan: up to ${limit} products &mdash; <a href="#" onclick="showUpgradeModal(${jsArg(s.store)});return false;" style="color:var(--yellow);text-decoration:underline;">View plan</a></span>`;
       }
     }).catch(() => {});
 
@@ -1776,11 +1777,6 @@ window.generateDesc = async function generateDesc(btn, name, brand, description,
       body: JSON.stringify({name, brand, description, missing, shop})
     });
     const data = await res.json();
-    if (data.error === 'LIMIT_REACHED') {
-      resultBox.style.display = 'none';
-      showUpgradeModal(shop);
-      btn.disabled = false; btn.textContent = 'Generate AI Description'; return;
-    }
     if (data.error) {
       resultBox.innerHTML = `<div class="error-banner">${escapeHtml(data.error)}</div>`;
     } else {
@@ -1852,11 +1848,6 @@ window.previewFirstFix = async function previewFirstFix(btn) {
       })
     });
     const data = await res.json();
-    if (data.error === 'LIMIT_REACHED') {
-      body.style.display = 'none';
-      showUpgradeModal(shop);
-      return;
-    }
     if (data.error) {
       body.innerHTML = `<div class="error-banner">${escapeHtml(data.error)}</div>`;
       return;
@@ -1896,10 +1887,6 @@ async function saveToShopify(btn, productId, shop, description) {
       body: JSON.stringify({product_id: productId, shop, description})
     });
     const data = await res.json();
-    if (data.error === 'LIMIT_REACHED') {
-      btn.disabled = false; btn.textContent = 'Save to Shopify';
-      showUpgradeModal(shop); return;
-    }
     if (data.success) {
       btn.textContent = 'Saved!';
       btn.style.background = 'var(--green)';
@@ -1972,10 +1959,6 @@ async function bulkFix(btn) {
         })
       });
       const genData = await genRes.json();
-      if (genData.error === 'LIMIT_REACHED') {
-        showUpgradeModal(shop);
-        break;
-      }
       if (genData.description && p.product_id) {
         const saveRes = await appFetch('/api/update_product', {
           method: 'POST',
@@ -1983,11 +1966,7 @@ async function bulkFix(btn) {
           body: JSON.stringify({product_id: p.product_id, shop, description: genData.description})
         });
         const saveData = await saveRes.json();
-        if (saveData.error === 'LIMIT_REACHED') {
-          failed++;
-          showUpgradeModal(shop);
-          break;
-        } else if (saveData.success) {
+        if (saveData.success) {
           saved++;
         } else {
           failed++;
@@ -2378,7 +2357,7 @@ if (document.readyState === 'loading') {
 </html>
 """
 
-def get_product_urls(store_url):
+def get_product_urls(store_url, limit=FREE_PRODUCT_LIMIT):
     """Get product URLs from Shopify store using multiple methods."""
     base = store_url.rstrip('/')
     if not base.startswith('http'):
@@ -2393,7 +2372,7 @@ def get_product_urls(store_url):
 
     # Method 1: products.json (most reliable)
     try:
-        r = requests.get(f"{base}/products.json?limit=20", headers=headers, timeout=12)
+        r = requests.get(f"{base}/products.json?limit={limit}", headers=headers, timeout=12)
         if r.status_code == 200:
             data = r.json()
             products = data.get('products', [])
@@ -2411,7 +2390,7 @@ def get_product_urls(store_url):
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, 'lxml-xml')
                 locs = soup.find_all('loc')
-                urls = [l.text.strip() for l in locs if '/products/' in l.text][:20]
+                urls = [l.text.strip() for l in locs if '/products/' in l.text][:limit]
         except Exception:
             pass
 
@@ -2429,7 +2408,7 @@ def get_product_urls(store_url):
                     if full not in seen:
                         seen.add(full)
                         urls.append(full)
-                    if len(urls) >= 20:
+                    if len(urls) >= limit:
                         break
         except Exception:
             pass
@@ -2448,12 +2427,12 @@ def get_product_urls(store_url):
                     if full not in seen:
                         seen.add(full)
                         urls.append(full)
-                    if len(urls) >= 20:
+                    if len(urls) >= limit:
                         break
         except Exception:
             pass
 
-    return urls[:20], products[:20]
+    return urls[:limit], products[:limit]
 
 
 def schema_from_shopify_product(data):
@@ -3057,7 +3036,7 @@ LANDING_TEMPLATE = """
       <ul class="price-features">
         <li class="en">Scan up to 20 products</li><li class="zh">扫描最多 20 个产品</li>
         <li class="en">Full AI Readiness Score</li><li class="zh">完整 AI 评分</li>
-        <li class="en">5 free AI fixes</li><li class="zh">5 次免费 AI 修复</li>
+        <li class="en">Scan up to 20 products</li><li class="zh">扫描最多 20 个产品</li>
         <li class="en">PDF report download</li><li class="zh">PDF 报告下载</li>
       </ul>
       <a href="/#scan-hero" class="btn-price btn-price-free">
@@ -3068,8 +3047,8 @@ LANDING_TEMPLATE = """
     <div class="price-card featured">
       <div class="price-tier en">Unlimited</div>
       <div class="price-tier zh">无限版</div>
-      <div class="price-amount">$9</div>
-      <div class="price-desc en">one-time, per store</div>
+      <div class="price-amount">$9.99</div>
+      <div class="price-desc en">per month, per store</div>
       <div class="price-desc zh">一次性付款，按店铺</div>
       <ul class="price-features">
         <li class="en">Everything in Free</li><li class="zh">包含所有免费功能</li>
@@ -3132,11 +3111,11 @@ LANDING_TEMPLATE = """
     </div>
     <div class="faq-item">
       <div class="faq-q" onclick="toggleFaq(this)">
-        <span class="en">What is the $9 one-time payment for?</span>
+        <span class="en">What is the $9.99 monthly plan for?</span>
         <span class="zh">9 美元一次性付款包含什么？</span>
         <span class="faq-icon">+</span>
       </div>
-      <div class="faq-a en">The $9 unlocks unlimited AI description generation, direct Shopify saving, bulk fix for all products, and weekly email reports &mdash; forever, for that store. No subscriptions, no recurring charges.</div>
+      <div class="faq-a en">The $9.99 monthly plan unlocks expanded product scanning, unlimited AI description generation, direct Shopify saving, bulk product fixes, and weekly email reports for one store.</div>
       <div class="faq-a zh">9 美元解锁该店铺的无限次 AI 描述生成、直接保存到 Shopify、批量修复全部产品、每周邮件报告 &mdash; 永久有效，无订阅，无续费。</div>
     </div>
   </div>
@@ -3212,7 +3191,7 @@ PRIVACY_TEMPLATE = """
   <ul>
     <li><strong>Store URL:</strong> The Shopify store domain you enter for scanning. This is used solely to perform the AI readiness scan.</li>
     <li><strong>Email address:</strong> Only if you subscribe to weekly reports or submit an upgrade request. Used to send you reports and unlock confirmation.</li>
-    <li><strong>Usage data:</strong> We track how many AI actions (description generation, saves) you have used per store domain to enforce the free usage limit.</li>
+    <li><strong>Usage data:</strong> We track store domains and scan size to enforce the free product scan limit.</li>
     <li><strong>Shopify OAuth token:</strong> If you connect your store via Shopify OAuth, we store an access token to enable saving fixes directly to your products. This token is stored securely and only used for actions you explicitly trigger.</li>
   </ul>
 
@@ -3296,7 +3275,7 @@ TERMS_TEMPLATE = """
   </ul>
 
   <h2>2. Free Tier and Paid Access</h2>
-  <p>The Service offers a free tier with limited usage (5 AI actions per store). Installed Shopify apps use Shopify Billing for paid access, currently $9.99 USD per month per store. Standalone web scanner payments, when offered outside the Shopify app, may use PayPal. Payments are non-refundable once paid access has been activated.</p>
+  <p>The Service offers a free tier that scans up to 20 products per store. Installed Shopify apps use Shopify Billing for paid access, currently $9.99 USD per month per store. Standalone web scanner payments, when offered outside the Shopify app, may use PayPal. Payments are non-refundable once paid access has been activated.</p>
 
   <h2>3. Shopify Integration</h2>
   <p>If you connect your Shopify store via OAuth, you grant AiReady permission to read and update product information on your behalf. You may revoke this permission at any time through your Shopify admin panel. AiReady will only make changes to your store when you explicitly trigger an action.</p>
@@ -3416,9 +3395,11 @@ def scan():
             'error': 'Please reconnect AiReady to Shopify so it can read products from this store.',
             'redirect': f'/install?shop={normalized_shop}&force=1',
         }), 401
+    paid = bool(normalized_shop and is_valid_shop(normalized_shop) and (is_paid(normalized_shop) or sync_shopify_billing_status(normalized_shop)))
+    product_limit = PAID_PRODUCT_LIMIT if paid else FREE_PRODUCT_LIMIT
     if normalized_shop and is_valid_shop(normalized_shop) and has_shop_token(normalized_shop):
         try:
-            shopify_products = fetch_shopify_admin_products(normalized_shop)
+            shopify_products = fetch_shopify_admin_products(normalized_shop, limit=product_limit)
             for product in shopify_products:
                 handle = product.get('handle', '')
                 url = product.get('online_store_url') or (f'https://{normalized_shop}/products/{handle}' if handle else '')
@@ -3438,7 +3419,7 @@ def scan():
             shopify_products = []
             product_urls = []
     if not product_urls:
-        product_urls, shopify_products = get_product_urls(store_url)
+        product_urls, shopify_products = get_product_urls(store_url, limit=product_limit)
     if not product_urls:
         return jsonify({'error': 'Could not find products. Make sure the store has products available to this app.'})
     product_by_handle = {p.get('handle', ''): p for p in shopify_products if p.get('handle')}
@@ -3502,6 +3483,8 @@ def scan():
             'total_products': len(results),
             'top_issues': [{'field': f, 'count': c} for f, c in top_issues],
             'has_token': has_token,
+            'paid': paid,
+            'product_limit': product_limit,
         }
     })
 
@@ -3515,14 +3498,11 @@ def api_usage():
         sync_shopify_billing_status(normalized)
         shop = normalized
     paid = is_paid(shop)
-    used = get_usage(shop)
-    remaining = None if paid else max(0, FREE_LIMIT - used)
     return jsonify({
         'shop': shop,
         'paid': paid,
-        'used': used,
-        'remaining': remaining,
-        'limit': FREE_LIMIT,
+        'product_limit': PAID_PRODUCT_LIMIT if paid else FREE_PRODUCT_LIMIT,
+        'free_product_limit': FREE_PRODUCT_LIMIT,
         'has_token': has_shop_token(shop),
     })
 
@@ -3669,11 +3649,6 @@ def generate():
     missing = data.get('missing', [])
     shop = data.get('shop', '').strip().lower()
 
-    if shop and not is_paid(shop):
-        used = get_usage(shop)
-        if used >= FREE_LIMIT:
-            return jsonify({'error': 'LIMIT_REACHED', 'used': used, 'limit': FREE_LIMIT}), 402
-
     if not DEEPSEEK_API_KEY:
         return jsonify({'error': 'DeepSeek API key not configured.'})
 
@@ -3711,8 +3686,6 @@ Return ONLY the description text. No labels, no JSON, no explanations."""
             timeout=20
         )
         description_out = r.json()['choices'][0]['message']['content'].strip()
-        if shop:
-            increment_usage(shop)
         return jsonify({'description': description_out})
     except Exception as e:
         return jsonify({'error': f'Generation failed: {str(e)}'})
@@ -3987,12 +3960,6 @@ def update_product():
     if not product_id:
         return jsonify({'error': 'Missing product_id.'}), 400
 
-    shop_key = shop.strip().lower()
-    if not is_paid(shop_key):
-        used = get_usage(shop_key)
-        if used >= FREE_LIMIT:
-            return jsonify({'error': 'LIMIT_REACHED', 'used': used, 'limit': FREE_LIMIT}), 402
-
     mutation = """
     mutation AiReadyUpdateDescription($product: ProductUpdateInput!) {
       productUpdate(product: $product) {
@@ -4014,7 +3981,6 @@ def update_product():
     errors = ((data.get('productUpdate') or {}).get('userErrors')) or []
     if errors:
         return jsonify({'error': '; '.join(err.get('message', 'Failed to update product.') for err in errors)}), 400
-    increment_usage(shop_key)
     return jsonify({'success': True})
 
 

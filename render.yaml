@@ -30,7 +30,7 @@ services:
       - key: SHOPIFY_MONTHLY_PRICE
         value: "9.99"
       - key: USD_PRICE
-        value: "9"
+        value: "9.99"
 
   - type: cron
     name: aiready-weekly-report
