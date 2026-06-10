@@ -1081,7 +1081,7 @@ HTML_TEMPLATE = """
     <div class="modal-price-sub" id="billingSubtitle">{% if shopify_app_context %}per month via Shopify billing{% else %}one-time via PayPal - unlimited forever{% endif %}</div>
     <div class="pay-store-row">
       <label class="pay-amount-label">店铺域名 Store URL <span style="color:#D72C0D">*</span></label>
-      <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="var paypalShop=document.getElementById('paypalShop'); if (paypalShop) paypalShop.value=this.value" />
+      <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="var paypalShop=document.getElementById('paypalShop'); if (paypalShop) paypalShop.value=this.value; var shopifyShop=document.getElementById('shopifyBillingShop'); if (shopifyShop) shopifyShop.value=this.value" />
     </div>
     <div class="modal-features">
       <div class="modal-feature">&#10003; &nbsp; Unlimited AI description generation</div>
@@ -1091,7 +1091,10 @@ HTML_TEMPLATE = """
     </div>
     <div id="modalStep1">
       <div id="shopifyBillingBox" style="display:{% if shopify_app_context %}block{% else %}none{% endif %};margin-bottom:12px;">
-        <button type="button" id="btnShopifyBilling" class="btn-primary" style="width:100%;padding:14px;font-size:15px;">Approve monthly plan in Shopify</button>
+        <form id="shopifyBillingForm" action="/shopify/billing/approve" method="get" target="_top" onsubmit="return prepareShopifyBillingSubmit(event)" style="margin:0;">
+          <input type="hidden" id="shopifyBillingShop" name="shop" value="{{ shop_prefill or '' }}" />
+          <button type="submit" id="btnShopifyBilling" class="btn-primary" style="width:100%;padding:14px;font-size:15px;">Approve monthly plan in Shopify</button>
+        </form>
         <div class="pay-amount-hint">For installed Shopify stores, payment is approved securely inside Shopify.</div>
         <div id="billingError" style="display:none;margin-top:10px;color:#D72C0D;font-size:13px;line-height:1.45;"></div>
       </div>
@@ -1261,6 +1264,28 @@ function getPaywallShop() {
   if (scan && scan.value.trim()) return scan.value.trim();
   return '';
 }
+function prepareShopifyBillingSubmit(e) {
+  const shop = getPaywallShop();
+  const errorBox = document.getElementById('billingError');
+  if (errorBox) { errorBox.style.display = 'none'; errorBox.innerHTML = ''; }
+  if (!shop) {
+    if (errorBox) {
+      errorBox.style.display = 'block';
+      errorBox.textContent = 'Please enter your store URL first.';
+    }
+    if (e) e.preventDefault();
+    return false;
+  }
+  var normalizedShop = shop.replace(new RegExp('^https?://'), '').split('/')[0].trim().toLowerCase();
+  if (normalizedShop && normalizedShop.indexOf('.myshopify.com') === -1) {
+    normalizedShop += '.myshopify.com';
+  }
+  const hidden = document.getElementById('shopifyBillingShop');
+  if (hidden) hidden.value = normalizedShop;
+  const btn = document.getElementById('btnShopifyBilling');
+  if (btn) { btn.disabled = true; btn.textContent = 'Opening Shopify...'; }
+  return true;
+}
 {% if not shopify_app_context %}
 async function handlePayPalSubmit(e) {
   e.preventDefault();
@@ -1288,82 +1313,6 @@ async function handlePayPalSubmit(e) {
   if (cancel) cancel.value = '{{ app_base_url }}/upgrade?shop=' + encodeURIComponent(normalizedShop);
   document.getElementById('paypalForm').submit();
   return false;
-}
-async function startShopifyBilling() {
-  const shop = getPaywallShop();
-  const errorBox = document.getElementById('billingError');
-  let approvalWindow = null;
-  if (errorBox) { errorBox.style.display = 'none'; errorBox.innerHTML = ''; }
-  if (!shop) {
-    if (errorBox) {
-      errorBox.style.display = 'block';
-      errorBox.textContent = 'Please enter your store URL first.';
-    }
-    return;
-  }
-  const btn = document.getElementById('btnShopifyBilling');
-  if (btn) { btn.disabled = true; btn.textContent = 'Opening Shopify...'; }
-  try {
-    approvalWindow = window.open('about:blank', '_blank');
-    if (approvalWindow) approvalWindow.document.title = 'Opening Shopify billing...';
-  } catch (e) {
-    approvalWindow = null;
-  }
-  try {
-    const res = await appFetch('/shopify/billing/start', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({shop})
-    });
-    const data = await res.json();
-    if (data.redirect) {
-      if (errorBox) {
-        errorBox.style.display = 'block';
-        errorBox.innerHTML = scanEsc(data.error || 'Please reconnect AiReady to Shopify first.') +
-          '<div style="margin-top:10px;"><button type="button" class="btn-primary" onclick="window.top.location.href=' + jsArg(data.redirect) + '">Reconnect Shopify</button></div>';
-      }
-      if (btn) { btn.disabled = false; btn.textContent = 'Approve monthly plan in Shopify'; }
-      if (approvalWindow) approvalWindow.close();
-      return;
-    }
-    if (data.confirmationUrl) {
-      if (errorBox) {
-        errorBox.style.display = 'block';
-        errorBox.style.color = '#008060';
-        errorBox.innerHTML = 'Shopify approval page is ready. If it does not open automatically, click the button again.';
-      }
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = 'Open Shopify approval page';
-        btn.onclick = function(e) {
-          e.preventDefault();
-          window.open(data.confirmationUrl, '_top');
-        };
-      }
-      try {
-        if (approvalWindow) {
-          approvalWindow.location.href = data.confirmationUrl;
-        } else {
-          window.open(data.confirmationUrl, '_top');
-        }
-      } catch (e) {
-        try { window.top.location.href = data.confirmationUrl; } catch (err) {}
-      }
-      return;
-    }
-    if (errorBox) {
-      errorBox.style.display = 'block';
-      errorBox.textContent = data.error || 'Could not start Shopify billing.';
-    }
-    if (approvalWindow) approvalWindow.close();
-  } catch(e) {
-    if (errorBox) {
-      errorBox.style.display = 'block';
-      errorBox.textContent = 'Could not connect to Shopify billing. Please try again.';
-    }
-    if (approvalWindow) approvalWindow.close();
-  }
-  if (btn) { btn.disabled = false; btn.textContent = 'Approve monthly plan in Shopify'; }
 }
 async function submitUnlockRequest() {
   const email = document.getElementById('unlockEmail').value.trim();
@@ -1407,12 +1356,10 @@ function bindPaywallButtons() {
   var later = document.getElementById('btnMaybeLater');
   var paid = document.getElementById('btnPaidStep');
   var confirmBtn = document.getElementById('btnConfirmUnlock');
-  var shopifyBilling = document.getElementById('btnShopifyBilling');
   var modal = document.getElementById('upgradeModal');
   if (later) later.addEventListener('click', function(e) { e.preventDefault(); closeUpgradeModal(); });
   if (paid) paid.addEventListener('click', function(e) { e.preventDefault(); showPaidStep(); });
   if (confirmBtn) confirmBtn.addEventListener('click', function(e) { e.preventDefault(); submitUnlockRequest(); });
-  if (shopifyBilling) shopifyBilling.addEventListener('click', function(e) { e.preventDefault(); startShopifyBilling(); });
   if (modal) modal.addEventListener('click', function(e) { if (e.target === modal) closeUpgradeModal(); });
   try {
     var params = new URLSearchParams(window.location.search);
@@ -3580,25 +3527,25 @@ def paypal_ipn():
     return 'OK', 200
 
 
-@app.route('/shopify/billing/start', methods=['POST'])
-def shopify_billing_start():
-    data = request.get_json() or {}
-    shop = normalize_shop(data.get('shop', session.get('shop', '')))
+def create_shopify_billing_confirmation(shop):
+    shop = normalize_shop(shop)
     try:
         token = get_shop_token(shop)
     except Exception as exc:
         app.logger.warning('Failed to load Shopify token for billing %s: %s', shop, exc)
-        return jsonify({
+        return {
             'error': 'Please reconnect AiReady to Shopify before approving the charge.',
             'redirect': f'/install?shop={shop}&force=1',
-        }), 401
+            'status': 401,
+        }
     if not shop or not token:
-        return jsonify({
+        return {
             'error': 'Install or reconnect the Shopify app before upgrading through Shopify.',
             'redirect': f'/install?shop={shop}&force=1' if shop else '',
-        }), 401
+            'status': 401,
+        }
     if is_paid(shop) or sync_shopify_billing_status(shop):
-        return jsonify({'success': True, 'already_paid': True, 'redirect': f'/app?shop={shop}&unlocked=1'})
+        return {'success': True, 'already_paid': True, 'redirect': f'/app?shop={shop}&unlocked=1', 'status': 200}
 
     mutation = """
     mutation AppSubscriptionCreate($name: String!, $lineItems: [AppSubscriptionLineItemInput!]!, $returnUrl: URL!, $test: Boolean) {
@@ -3627,11 +3574,11 @@ def shopify_billing_start():
         payload = result.get('appSubscriptionCreate') or {}
         errors = payload.get('userErrors') or []
         if errors:
-            return jsonify({'error': '; '.join(e.get('message', 'Billing error') for e in errors)}), 400
+            return {'error': '; '.join(e.get('message', 'Billing error') for e in errors), 'status': 400}
         confirmation_url = payload.get('confirmationUrl')
         if not confirmation_url:
-            return jsonify({'error': 'Shopify did not return a billing confirmation URL.'}), 400
-        return jsonify({'success': True, 'confirmationUrl': confirmation_url})
+            return {'error': 'Shopify did not return a billing confirmation URL.', 'status': 400}
+        return {'success': True, 'confirmationUrl': confirmation_url, 'status': 200}
     except Exception as exc:
         app.logger.warning('Failed to create Shopify billing charge for %s: %s', shop, exc)
         if (
@@ -3639,11 +3586,35 @@ def shopify_billing_start():
             or 'GraphQL 403' in str(exc)
             or 'Non-expiring access tokens' in str(exc)
         ):
-            return jsonify({
+            return {
                 'error': 'Please reconnect AiReady to Shopify before approving the charge.',
                 'redirect': f'/install?shop={shop}&force=1',
-            }), 401
-        return jsonify({'error': f'Could not start Shopify billing: {str(exc)[:220]}'}), 500
+                'status': 401,
+            }
+        return {'error': f'Could not start Shopify billing: {str(exc)[:220]}', 'status': 500}
+
+
+@app.route('/shopify/billing/start', methods=['POST'])
+def shopify_billing_start():
+    data = request.get_json() or {}
+    payload = create_shopify_billing_confirmation(data.get('shop', session.get('shop', '')))
+    status = payload.pop('status', 200)
+    return jsonify(payload), status
+
+
+@app.route('/shopify/billing/approve')
+def shopify_billing_approve():
+    shop = normalize_shop(request.args.get('shop', session.get('shop', '')))
+    payload = create_shopify_billing_confirmation(shop)
+    if payload.get('confirmationUrl'):
+        return redirect(payload['confirmationUrl'])
+    if payload.get('redirect'):
+        return redirect(payload['redirect'])
+    qs = urlencode({
+        'shop': shop,
+        'billing_error': payload.get('error', 'Could not start Shopify billing.'),
+    })
+    return redirect(f'/upgrade?{qs}')
 
 
 @app.route('/shopify/billing/return')

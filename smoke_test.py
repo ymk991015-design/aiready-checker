@@ -89,6 +89,8 @@ def test_pages(mod):
     assert_true("admin/oauth/authorize" in forced_install.headers.get("Location", ""), "forced install did not start OAuth")
     embedded_paid = client.get("/app?shop=embedded-paid.myshopify.com&upgrade=1").get_data(as_text=True)
     assert_true("Approve monthly plan in Shopify" in embedded_paid, "Shopify billing missing for installed app")
+    assert_true('action="/shopify/billing/approve"' in embedded_paid, "Shopify billing form action missing")
+    assert_true("startShopifyBilling" not in embedded_paid, "old async billing click handler rendered in Shopify app")
     assert_true("PayPal" not in embedded_paid, "PayPal was rendered inside installed Shopify app")
     assert_true('value="embedded-paid.myshopify.com"' in embedded_paid, "embedded Shopify app did not prefill shop")
     upgrade_paid = client.get("/upgrade?shop=embedded-paid.myshopify.com").get_data(as_text=True)
@@ -201,6 +203,13 @@ def test_shopify_billing(mod):
         res = client.post("/shopify/billing/start", json={"shop": "demo.myshopify.com"})
     assert_true(res.status_code == 200, f"billing start failed {res.status_code}")
     assert_true(res.get_json().get("confirmationUrl"), "billing confirmationUrl missing")
+    with patch("app.requests.post", return_value=Resp()):
+        approve = client.get("/shopify/billing/approve?shop=demo.myshopify.com")
+    assert_true(approve.status_code == 302, f"billing approve did not redirect {approve.status_code}")
+    assert_true(
+        approve.headers.get("Location") == "https://demo.myshopify.com/admin/charges/confirm_recurring_application_charge",
+        "billing approve did not redirect to Shopify confirmation URL",
+    )
 
     class RejectResp:
         status_code = 403
