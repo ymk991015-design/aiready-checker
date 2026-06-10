@@ -81,6 +81,9 @@ def test_pages(mod):
     assert_true(embedded.status_code == 302, "embedded app did not start Shopify install")
     assert_true("/install?shop=embedded-smoke.myshopify.com" in embedded.headers.get("Location", ""), "embedded app install redirect missing shop")
     mod.save_shop_token("embedded-paid.myshopify.com", "token", "read_products,write_products")
+    forced_install = client.get("/install?shop=embedded-paid.myshopify.com&force=1")
+    assert_true(forced_install.status_code == 302, "forced install did not redirect")
+    assert_true("admin/oauth/authorize" in forced_install.headers.get("Location", ""), "forced install did not start OAuth")
     embedded_paid = client.get("/app?shop=embedded-paid.myshopify.com&upgrade=1").get_data(as_text=True)
     assert_true("Approve charge in Shopify" in embedded_paid, "Shopify billing missing for installed app")
     assert_true("PayPal" not in embedded_paid, "PayPal was rendered inside installed Shopify app")
@@ -104,7 +107,7 @@ def test_pages(mod):
         headers={"Authorization": f"Bearer {reconnect_token}"},
     )
     assert_true(reconnect.status_code == 401, "scan without offline token did not request reconnect")
-    assert_true(reconnect.get_json().get("redirect") == "/install?shop=needs-reconnect.myshopify.com", "reconnect redirect missing")
+    assert_true(reconnect.get_json().get("redirect") == "/install?shop=needs-reconnect.myshopify.com&force=1", "reconnect redirect missing")
 
 
 def test_admin_requires_configured_secret(mod):

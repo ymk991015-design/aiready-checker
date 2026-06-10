@@ -2147,7 +2147,8 @@ async function runScan() {
     var data;
     try { data = await res.json(); } catch (e) { data = {error: 'Server error (' + res.status + '). Try gymshark.com or retry.'}; }
     if (data.redirect) {
-      window.top.location.href = data.redirect;
+      results.innerHTML = '<div class="error-banner">Error: ' + scanEsc(data.error || 'Please reconnect AiReady to Shopify.') +
+        '<div style="margin-top:12px;"><button class="btn-primary" onclick="window.top.location.href=' + jsArg(data.redirect) + '">Reconnect Shopify</button></div></div>';
       return;
     }
     if (!res.ok && !data.error) data.error = 'Scan failed (' + res.status + '). Try gymshark.com or wait and retry.';
@@ -3274,7 +3275,7 @@ def scan():
     if normalized_shop and is_valid_shop(normalized_shop) and not has_shop_token(normalized_shop) and session_shop == normalized_shop:
         return jsonify({
             'error': 'Please reconnect AiReady to Shopify so it can read products from this store.',
-            'redirect': f'/install?shop={normalized_shop}',
+            'redirect': f'/install?shop={normalized_shop}&force=1',
         }), 401
     if normalized_shop and is_valid_shop(normalized_shop) and has_shop_token(normalized_shop):
         try:
@@ -3289,7 +3290,7 @@ def scan():
             if 'GraphQL 401' in str(exc) or 'GraphQL 403' in str(exc):
                 return jsonify({
                     'error': 'Please reconnect AiReady to Shopify so it can read products from this store.',
-                    'redirect': f'/install?shop={normalized_shop}',
+                    'redirect': f'/install?shop={normalized_shop}&force=1',
                 }), 401
             return jsonify({
                 'error': 'Could not read products from Shopify Admin API. Please reopen AiReady from Shopify Admin and try again.',
@@ -3615,7 +3616,7 @@ def install():
         return 'Invalid HMAC signature.', 403
     if not SHOPIFY_CLIENT_ID or not SHOPIFY_CLIENT_SECRET:
         return 'Shopify app credentials are not configured.', 500
-    if has_shop_token(shop):
+    if has_shop_token(shop) and request.args.get('force') != '1':
         return redirect(f'/app?shop={shop}')
     state = create_oauth_state(shop)
     session['oauth_state'] = state
@@ -3732,7 +3733,7 @@ def api_products():
         if 'GraphQL 401' in str(exc) or 'GraphQL 403' in str(exc):
             return jsonify({
                 'error': 'Please reconnect AiReady to Shopify.',
-                'redirect': f'/install?shop={shop}',
+                'redirect': f'/install?shop={shop}&force=1',
             }), 401
         return jsonify({'error': 'Failed to fetch products from Shopify.'}), 400
     return jsonify({'products': products})
