@@ -539,14 +539,8 @@ def fetch_shopify_admin_products(shop, limit=20):
             title
             handle
             vendor
-            descriptionHtml
-            onlineStoreUrl
-            featuredMedia {
-              preview {
-                image {
-                  url
-                }
-              }
+            featuredImage {
+              url
             }
             options {
               name
@@ -572,7 +566,10 @@ def fetch_shopify_admin_products(shop, limit=20):
     products = []
     for edge in (((data.get('products') or {}).get('edges')) or []):
         node = edge.get('node') or {}
-        image_url = (((node.get('featuredMedia') or {}).get('preview') or {}).get('image') or {}).get('url')
+        image_url = (
+            ((node.get('featuredImage') or {}).get('url'))
+            or (((node.get('featuredMedia') or {}).get('preview') or {}).get('image') or {}).get('url')
+        )
         variants = []
         for variant_edge in (((node.get('variants') or {}).get('edges')) or []):
             variant = variant_edge.get('node') or {}
@@ -3291,6 +3288,11 @@ def scan():
                     product_urls.append(url)
         except Exception as exc:
             app.logger.warning('Falling back to storefront scan for %s: %s', normalized_shop, exc)
+            if session_shop == normalized_shop or 'GraphQL 401' in str(exc) or 'GraphQL 403' in str(exc):
+                return jsonify({
+                    'error': 'Please reconnect AiReady to Shopify so it can read products from this store.',
+                    'redirect': f'/install?shop={normalized_shop}',
+                }), 401
             shopify_products = []
             product_urls = []
     if not product_urls:
@@ -3725,6 +3727,11 @@ def api_products():
         products = fetch_shopify_admin_products(shop)
     except Exception as exc:
         app.logger.warning('Failed to fetch products through GraphQL for %s: %s', shop, exc)
+        if 'GraphQL 401' in str(exc) or 'GraphQL 403' in str(exc):
+            return jsonify({
+                'error': 'Please reconnect AiReady to Shopify.',
+                'redirect': f'/install?shop={shop}',
+            }), 401
         return jsonify({'error': 'Failed to fetch products from Shopify.'}), 400
     return jsonify({'products': products})
 
