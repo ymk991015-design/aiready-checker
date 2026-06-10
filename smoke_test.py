@@ -314,6 +314,11 @@ def test_shopify_graphql_admin_api(mod):
         vendor = client.post("/api/update_vendor", json={"shop": "graphql-demo.myshopify.com", "product_id": "123", "vendor": "New Brand"})
         description = client.post("/api/update_product", json={"shop": "graphql-demo.myshopify.com", "product_id": "123", "description": "<p>New copy</p>"})
         webhook_ok = mod.register_app_uninstalled_webhook("graphql-demo.myshopify.com", "token")
+        blocked_debug = client.get("/admin/shopify-debug?shop=graphql-demo.myshopify.com")
+        debug = client.get(
+            "/admin/shopify-debug?shop=graphql-demo.myshopify.com",
+            headers={"X-Admin-Secret": "smoke-admin"},
+        )
 
     assert_true(products.status_code == 200, f"GraphQL products failed {products.status_code}")
     assert_true(products.get_json()["products"][0]["admin_graphql_api_id"] == "gid://shopify/Product/123", "GraphQL product id missing")
@@ -322,6 +327,8 @@ def test_shopify_graphql_admin_api(mod):
     assert_true(vendor.status_code == 200, f"GraphQL vendor update failed {vendor.status_code}")
     assert_true(description.status_code == 200, f"GraphQL description update failed {description.status_code}")
     assert_true(webhook_ok, "GraphQL webhook registration failed")
+    assert_true(blocked_debug.status_code == 401, "Shopify debug endpoint allowed unauthenticated access")
+    assert_true(debug.status_code == 200 and debug.get_json()["graphql_ok"], "Shopify debug endpoint failed")
     assert_true(all("/graphql.json" in call["url"] for call in calls), "Admin API call did not use GraphQL endpoint")
     assert_true(not any("products.json" in call["url"] or "webhooks.json" in call["url"] for call in calls), "REST Admin API endpoint used")
     update_vars = [call["json"].get("variables", {}) for call in calls if "productUpdate" in call["json"].get("query", "")]

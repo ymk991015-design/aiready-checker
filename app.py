@@ -647,6 +647,19 @@ def get_shop_token(shop):
     row = db_execute('SELECT access_token FROM shop_tokens WHERE shop=?', (shop,), fetchone=True)
     return row[0] if row else ''
 
+def get_shop_token_info(shop):
+    row = db_execute('SELECT access_token, scope, updated_at FROM shop_tokens WHERE shop=?', (shop,), fetchone=True)
+    if not row:
+        return {'has_token': False, 'scope': '', 'updated_at': ''}
+    token = row[0] or ''
+    return {
+        'has_token': bool(token),
+        'token_length': len(token),
+        'token_tail': token[-6:] if token else '',
+        'scope': row[1] or '',
+        'updated_at': row[2] or '',
+    }
+
 def has_shop_token(shop):
     return bool(get_shop_token(shop))
 
@@ -3737,6 +3750,29 @@ def api_products():
             }), 401
         return jsonify({'error': 'Failed to fetch products from Shopify.'}), 400
     return jsonify({'products': products})
+
+@app.route('/admin/shopify-debug')
+def admin_shopify_debug():
+    secret = request.headers.get('X-Admin-Secret', '')
+    if not ADMIN_SECRET or secret != ADMIN_SECRET:
+        return jsonify({'error': 'Unauthorized'}), 401
+    shop = normalize_shop(request.args.get('shop', ''))
+    if not is_valid_shop(shop):
+        return jsonify({'error': 'valid shop required'}), 400
+    info = get_shop_token_info(shop)
+    result = {'shop': shop, **info}
+    token = get_shop_token(shop)
+    if token:
+        query = '{ shop { name myshopifyDomain } products(first: 1) { edges { node { id title } } } }'
+        try:
+            data = shopify_graphql(shop, token, query)
+            result['graphql_ok'] = True
+            result['shop_name'] = ((data.get('shop') or {}).get('name')) or ''
+            result['product_count_sample'] = len((((data.get('products') or {}).get('edges')) or []))
+        except Exception as exc:
+            result['graphql_ok'] = False
+            result['graphql_error'] = str(exc)[:500]
+    return jsonify(result)
 
 
 @app.route('/api/update_vendor', methods=['POST'])
