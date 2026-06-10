@@ -1299,10 +1299,23 @@ async function startShopifyBilling() {
       return;
     }
     if (data.confirmationUrl) {
+      if (errorBox) {
+        errorBox.style.display = 'block';
+        errorBox.style.color = '#008060';
+        errorBox.innerHTML = 'Shopify charge page is ready. If it does not open automatically, click the button again.';
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Open Shopify charge page';
+        btn.onclick = function(e) {
+          e.preventDefault();
+          window.open(data.confirmationUrl, '_top');
+        };
+      }
       try {
         window.open(data.confirmationUrl, '_top');
       } catch (e) {
-        window.top.location.href = data.confirmationUrl;
+        try { window.top.location.href = data.confirmationUrl; } catch (err) {}
       }
       return;
     }
