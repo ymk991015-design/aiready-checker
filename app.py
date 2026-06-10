@@ -1292,6 +1292,7 @@ async function handlePayPalSubmit(e) {
 async function startShopifyBilling() {
   const shop = getPaywallShop();
   const errorBox = document.getElementById('billingError');
+  let approvalWindow = null;
   if (errorBox) { errorBox.style.display = 'none'; errorBox.innerHTML = ''; }
   if (!shop) {
     if (errorBox) {
@@ -1302,6 +1303,12 @@ async function startShopifyBilling() {
   }
   const btn = document.getElementById('btnShopifyBilling');
   if (btn) { btn.disabled = true; btn.textContent = 'Opening Shopify...'; }
+  try {
+    approvalWindow = window.open('about:blank', '_blank');
+    if (approvalWindow) approvalWindow.document.title = 'Opening Shopify billing...';
+  } catch (e) {
+    approvalWindow = null;
+  }
   try {
     const res = await appFetch('/shopify/billing/start', {
       method: 'POST',
@@ -1316,6 +1323,7 @@ async function startShopifyBilling() {
           '<div style="margin-top:10px;"><button type="button" class="btn-primary" onclick="window.top.location.href=' + jsArg(data.redirect) + '">Reconnect Shopify</button></div>';
       }
       if (btn) { btn.disabled = false; btn.textContent = 'Approve monthly plan in Shopify'; }
+      if (approvalWindow) approvalWindow.close();
       return;
     }
     if (data.confirmationUrl) {
@@ -1333,7 +1341,11 @@ async function startShopifyBilling() {
         };
       }
       try {
-        window.open(data.confirmationUrl, '_top');
+        if (approvalWindow) {
+          approvalWindow.location.href = data.confirmationUrl;
+        } else {
+          window.open(data.confirmationUrl, '_top');
+        }
       } catch (e) {
         try { window.top.location.href = data.confirmationUrl; } catch (err) {}
       }
@@ -1343,11 +1355,13 @@ async function startShopifyBilling() {
       errorBox.style.display = 'block';
       errorBox.textContent = data.error || 'Could not start Shopify billing.';
     }
+    if (approvalWindow) approvalWindow.close();
   } catch(e) {
     if (errorBox) {
       errorBox.style.display = 'block';
       errorBox.textContent = 'Could not connect to Shopify billing. Please try again.';
     }
+    if (approvalWindow) approvalWindow.close();
   }
   if (btn) { btn.disabled = false; btn.textContent = 'Approve monthly plan in Shopify'; }
 }
