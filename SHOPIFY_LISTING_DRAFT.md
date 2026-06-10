@@ -26,7 +26,7 @@ AiReady is built for merchants who want their product catalog to be easier for A
 - Save approved descriptions back to Shopify.
 - Preview one AI repair before upgrading.
 - Download or email a scan report.
-- Unlock unlimited fixes with Shopify one-time billing.
+- Unlock unlimited fixes with Shopify monthly billing.
 
 ## Pricing Copy
 
@@ -39,7 +39,7 @@ Free plan:
 
 Unlimited:
 
-- One-time $9 USD charge through Shopify Billing.
+- $9.99 USD monthly subscription through Shopify Billing.
 - Unlimited AI description generation for one store.
 - Save approved descriptions to Shopify.
 - Bulk fix products.
@@ -54,7 +54,7 @@ Unlimited:
 5. Open a product row and click "Generate AI Description".
 6. If the store is connected through Shopify OAuth, click "Save to Shopify" to confirm the description update flow.
 7. Use 5 free AI actions to trigger the upgrade modal.
-8. Click "Approve charge in Shopify" to test the one-time billing approval flow.
+8. Click "Approve monthly plan in Shopify" to test the Shopify billing approval flow.
 9. Return to the app and confirm the store shows as unlocked.
 10. Optional: enter an email in the report box to test report subscription capture.
 

@@ -107,12 +107,13 @@ PAYPAL_RECEIVER_EMAIL
 USD_PRICE=9
 ```
 
-PayPal is for the standalone web scanner only. For installed Shopify stores, AiReady starts a Shopify one-time app purchase through the GraphQL Admin API.
+PayPal is for the standalone web scanner only. For installed Shopify stores, AiReady starts a Shopify monthly subscription through the GraphQL Admin API.
 
 Optional Shopify billing settings:
 
 ```text
 SHOPIFY_BILLING_NAME=AiReady Unlimited
+SHOPIFY_MONTHLY_PRICE=9.99
 SHOPIFY_BILLING_TEST=false
 ```
 

@@ -23,6 +23,7 @@ RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
 REPORT_FROM_EMAIL = os.environ.get('REPORT_FROM_EMAIL', 'AiReady <onboarding@resend.dev>')
 CRON_SECRET = os.environ.get('CRON_SECRET', '')
 USD_PRICE = float(os.environ.get('USD_PRICE', '9'))
+SHOPIFY_MONTHLY_PRICE = float(os.environ.get('SHOPIFY_MONTHLY_PRICE', '9.99'))
 SHOPIFY_BILLING_TEST = os.environ.get('SHOPIFY_BILLING_TEST', '').lower() in ('1', 'true', 'yes')
 SHOPIFY_BILLING_NAME = os.environ.get('SHOPIFY_BILLING_NAME', 'AiReady Unlimited')
 PAYPAL_HOSTED_BUTTON_ID = os.environ.get('PAYPAL_HOSTED_BUTTON_ID', 'VA8TFCR6A8NMY')
@@ -33,6 +34,15 @@ DB_PATH = os.environ.get('DB_PATH', os.path.join(tempfile.gettempdir(), 'aiready
 USE_POSTGRES = bool(DATABASE_URL)
 
 FREE_LIMIT = 5  # free AI actions per shop
+
+def display_price(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return value
+    if value == int(value):
+        return str(int(value))
+    return f'{value:.2f}'.rstrip('0').rstrip('.')
 
 @app.after_request
 def add_security_headers(response):
@@ -661,16 +671,22 @@ def sync_shopify_billing_status(shop):
     if not shop or not token:
         return False
     query = """
-    query CurrentAppPurchases {
+    query CurrentAppSubscriptions {
       currentAppInstallation {
-        oneTimePurchases(first: 20, reverse: true, sortKey: CREATED_AT) {
-          edges {
-            node {
-              id
-              name
-              status
-              test
-              price { amount currencyCode }
+        activeSubscriptions {
+          id
+          name
+          status
+          test
+          lineItems {
+            plan {
+              pricingDetails {
+                __typename
+                ... on AppRecurringPricing {
+                  interval
+                  price { amount currencyCode }
+                }
+              }
             }
           }
         }
@@ -682,22 +698,25 @@ def sync_shopify_billing_status(shop):
     except Exception as exc:
         app.logger.warning('Failed to sync Shopify billing for %s: %s', shop, exc)
         return False
-    purchases = (((data.get('currentAppInstallation') or {}).get('oneTimePurchases') or {}).get('edges') or [])
-    for edge in purchases:
-        node = edge.get('node') or {}
-        price = node.get('price') or {}
-        try:
-            amount = float(price.get('amount') or 0)
-        except (TypeError, ValueError):
-            amount = 0
-        if (
-            node.get('name') == SHOPIFY_BILLING_NAME
-            and node.get('status') == 'ACTIVE'
-            and price.get('currencyCode') == 'USD'
-            and amount + 0.01 >= USD_PRICE
-        ):
-            mark_shop_paid(shop, 'shopify:' + node.get('id', 'one-time-purchase'))
-            return True
+    subscriptions = ((data.get('currentAppInstallation') or {}).get('activeSubscriptions') or [])
+    for subscription in subscriptions:
+        if subscription.get('name') != SHOPIFY_BILLING_NAME or subscription.get('status') != 'ACTIVE':
+            continue
+        for item in subscription.get('lineItems') or []:
+            pricing = (((item.get('plan') or {}).get('pricingDetails')) or {})
+            price = pricing.get('price') or {}
+            try:
+                amount = float(price.get('amount') or 0)
+            except (TypeError, ValueError):
+                amount = 0
+            if (
+                pricing.get('__typename') == 'AppRecurringPricing'
+                and pricing.get('interval') == 'EVERY_30_DAYS'
+                and price.get('currencyCode') == 'USD'
+                and amount + 0.01 >= SHOPIFY_MONTHLY_PRICE
+            ):
+                mark_shop_paid(shop, 'shopify_subscription:' + subscription.get('id', 'monthly-subscription'))
+                return True
     return False
 
 def get_shop_token(shop):
@@ -1056,9 +1075,9 @@ HTML_TEMPLATE = """
   <div class="modal-box">
     <div class="modal-icon">&#128274;</div>
     <div class="modal-title">{% if open_upgrade %}Upgrade to Unlimited{% else %}You've used your 5 free actions{% endif %}</div>
-    <div class="modal-sub">{% if open_upgrade %}One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.{% else %}Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.{% endif %}</div>
-    <div class="modal-price">${{ usd_price }}</div>
-    <div class="modal-price-sub" id="billingSubtitle">{% if shopify_app_context %}one-time via Shopify billing - unlimited forever{% else %}one-time via PayPal - unlimited forever{% endif %}</div>
+    <div class="modal-sub">{% if shopify_app_context %}Monthly Shopify billing unlocks unlimited AI fixes, descriptions, and saves for your store.{% elif open_upgrade %}One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.{% else %}Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.{% endif %}</div>
+    <div class="modal-price">{% if shopify_app_context %}${{ shopify_monthly_price }}{% else %}${{ paypal_price }}{% endif %}</div>
+    <div class="modal-price-sub" id="billingSubtitle">{% if shopify_app_context %}per month via Shopify billing{% else %}one-time via PayPal - unlimited forever{% endif %}</div>
     <div class="pay-store-row">
       <label class="pay-amount-label">店铺域名 Store URL <span style="color:#D72C0D">*</span></label>
       <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="var paypalShop=document.getElementById('paypalShop'); if (paypalShop) paypalShop.value=this.value" />
@@ -1071,7 +1090,7 @@ HTML_TEMPLATE = """
     </div>
     <div id="modalStep1">
       <div id="shopifyBillingBox" style="display:{% if shopify_app_context %}block{% else %}none{% endif %};margin-bottom:12px;">
-        <button type="button" id="btnShopifyBilling" class="btn-primary" style="width:100%;padding:14px;font-size:15px;">Approve charge in Shopify</button>
+        <button type="button" id="btnShopifyBilling" class="btn-primary" style="width:100%;padding:14px;font-size:15px;">Approve monthly plan in Shopify</button>
         <div class="pay-amount-hint">For installed Shopify stores, payment is approved securely inside Shopify.</div>
         <div id="billingError" style="display:none;margin-top:10px;color:#D72C0D;font-size:13px;line-height:1.45;"></div>
       </div>
@@ -1088,14 +1107,14 @@ HTML_TEMPLATE = """
           <input type="hidden" name="cbt" value="Return to AiReady" />
           <input type="image" src="https://www.paypalobjects.com/en_US/i/btn/btn_buynowCC_LG.gif" border="0" name="submit" title="PayPal - The safer, easier way to pay online!" alt="Buy Now" style="width:100%;max-width:240px;height:auto;" />
         </form>
-        <div class="pay-amount-hint">Fixed ${{ usd_price }} USD via PayPal. You will return here after payment.</div>
+        <div class="pay-amount-hint">Fixed ${{ paypal_price }} USD via PayPal. You will return here after payment.</div>
         <button type="button" id="btnPaidStep" class="pay-done-btn">I paid on PayPal &rarr;</button>
       </div>
       {% endif %}
     </div>
     {% if not shopify_app_context %}
     <div id="modalStep2" style="display:none;margin-top:16px;">
-      <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Enter the PayPal email you used to pay ${{ usd_price }}:</p>
+      <p style="font-size:13px;color:var(--text-sub);margin-bottom:10px;">Enter the PayPal email you used to pay ${{ paypal_price }}:</p>
       <input type="email" id="unlockEmail" class="scan-input" placeholder="your@paypal.email" style="margin-bottom:8px;" />
       <button type="button" id="btnConfirmUnlock" class="btn-primary" style="width:100%;padding:12px;">Submit payment email</button>
       <div id="unlockMsg" style="margin-top:10px;font-size:13px;display:none;"></div>
@@ -1146,7 +1165,7 @@ function setBillingMode(useShopify) {
   if (paypalBox) paypalBox.style.display = useShopify ? 'none' : 'block';
   if (paidStep) paidStep.style.display = useShopify ? 'none' : 'block';
   if (subtitle) subtitle.textContent = useShopify
-    ? 'one-time via Shopify billing - unlimited forever'
+    ? 'per month via Shopify billing'
     : '{% if shopify_app_context %}one-time - unlimited forever{% else %}one-time via PayPal - unlimited forever{% endif %}';
 }
 async function getShopifySessionToken() {
@@ -1295,18 +1314,18 @@ async function startShopifyBilling() {
         errorBox.innerHTML = scanEsc(data.error || 'Please reconnect AiReady to Shopify first.') +
           '<div style="margin-top:10px;"><button type="button" class="btn-primary" onclick="window.top.location.href=' + jsArg(data.redirect) + '">Reconnect Shopify</button></div>';
       }
-      if (btn) { btn.disabled = false; btn.textContent = 'Approve charge in Shopify'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Approve monthly plan in Shopify'; }
       return;
     }
     if (data.confirmationUrl) {
       if (errorBox) {
         errorBox.style.display = 'block';
         errorBox.style.color = '#008060';
-        errorBox.innerHTML = 'Shopify charge page is ready. If it does not open automatically, click the button again.';
+        errorBox.innerHTML = 'Shopify approval page is ready. If it does not open automatically, click the button again.';
       }
       if (btn) {
         btn.disabled = false;
-        btn.textContent = 'Open Shopify charge page';
+        btn.textContent = 'Open Shopify approval page';
         btn.onclick = function(e) {
           e.preventDefault();
           window.open(data.confirmationUrl, '_top');
@@ -1329,7 +1348,7 @@ async function startShopifyBilling() {
       errorBox.textContent = 'Could not connect to Shopify billing. Please try again.';
     }
   }
-  if (btn) { btn.disabled = false; btn.textContent = 'Approve charge in Shopify'; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Approve monthly plan in Shopify'; }
 }
 async function submitUnlockRequest() {
   const email = document.getElementById('unlockEmail').value.trim();
@@ -3277,7 +3296,7 @@ TERMS_TEMPLATE = """
   </ul>
 
   <h2>2. Free Tier and Paid Access</h2>
-  <p>The Service offers a free tier with limited usage (5 AI actions per store). After exhausting free actions, a one-time payment of $9 USD is required to unlock unlimited access for that store. Payments are non-refundable once the unlimited access has been activated.</p>
+  <p>The Service offers a free tier with limited usage (5 AI actions per store). Installed Shopify apps use Shopify Billing for paid access, currently $9.99 USD per month per store. Standalone web scanner payments, when offered outside the Shopify app, may use PayPal. Payments are non-refundable once paid access has been activated.</p>
 
   <h2>3. Shopify Integration</h2>
   <p>If you connect your Shopify store via OAuth, you grant AiReady permission to read and update product information on your behalf. You may revoke this permission at any time through your Shopify admin panel. AiReady will only make changes to your store when you explicitly trigger an action.</p>
@@ -3334,7 +3353,9 @@ def _render_app_page(open_upgrade=False, shop_prefill='', url_param='', shopify_
         shopify_client_id=SHOPIFY_CLIENT_ID,
         paypal_hosted_button_id=PAYPAL_HOSTED_BUTTON_ID,
         app_base_url=APP_BASE_URL,
-        usd_price=int(USD_PRICE) if USD_PRICE == int(USD_PRICE) else USD_PRICE,
+        usd_price=display_price(USD_PRICE),
+        paypal_price=display_price(USD_PRICE),
+        shopify_monthly_price=display_price(SHOPIFY_MONTHLY_PRICE),
     )
 
 
@@ -3586,10 +3607,10 @@ def shopify_billing_start():
         return jsonify({'success': True, 'already_paid': True, 'redirect': f'/app?shop={shop}&unlocked=1'})
 
     mutation = """
-    mutation AppPurchaseOneTimeCreate($name: String!, $price: MoneyInput!, $returnUrl: URL!, $test: Boolean) {
-      appPurchaseOneTimeCreate(name: $name, returnUrl: $returnUrl, price: $price, test: $test) {
+    mutation AppSubscriptionCreate($name: String!, $lineItems: [AppSubscriptionLineItemInput!]!, $returnUrl: URL!, $test: Boolean) {
+      appSubscriptionCreate(name: $name, returnUrl: $returnUrl, lineItems: $lineItems, test: $test) {
         userErrors { field message }
-        appPurchaseOneTime { id }
+        appSubscription { id status }
         confirmationUrl
       }
     }
@@ -3597,12 +3618,19 @@ def shopify_billing_start():
     variables = {
         'name': SHOPIFY_BILLING_NAME,
         'returnUrl': f'{APP_BASE_URL}/shopify/billing/return?shop={shop}',
-        'price': {'amount': USD_PRICE, 'currencyCode': 'USD'},
+        'lineItems': [{
+            'plan': {
+                'appRecurringPricingDetails': {
+                    'price': {'amount': SHOPIFY_MONTHLY_PRICE, 'currencyCode': 'USD'},
+                    'interval': 'EVERY_30_DAYS',
+                },
+            },
+        }],
         'test': SHOPIFY_BILLING_TEST,
     }
     try:
         result = shopify_graphql(shop, token, mutation, variables)
-        payload = result.get('appPurchaseOneTimeCreate') or {}
+        payload = result.get('appSubscriptionCreate') or {}
         errors = payload.get('userErrors') or []
         if errors:
             return jsonify({'error': '; '.join(e.get('message', 'Billing error') for e in errors)}), 400

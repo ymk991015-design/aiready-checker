@@ -70,7 +70,7 @@ def test_pages(mod):
     assert_true(embedded_landing.status_code == 302, "embedded landing did not redirect to app")
     assert_true(embedded_landing.headers.get("Location", "").startswith("/app?"), "embedded landing redirect target wrong")
     assert_true('href="/privacy"' in app_html and 'href="/terms"' in app_html, "app legal links missing")
-    assert_true("Approve charge in Shopify" in app_html, "Shopify billing button missing")
+    assert_true("Approve monthly plan in Shopify" in app_html, "Shopify billing button missing")
     assert_true("PayPal" in app_html, "standalone PayPal option missing")
     assert_true("Free AI repair preview" in app_html, "AI repair preview missing")
     assert_true('meta name="shopify-api-key"' in app_html, "Shopify App Bridge meta missing")
@@ -85,7 +85,7 @@ def test_pages(mod):
     assert_true(forced_install.status_code == 302, "forced install did not redirect")
     assert_true("admin/oauth/authorize" in forced_install.headers.get("Location", ""), "forced install did not start OAuth")
     embedded_paid = client.get("/app?shop=embedded-paid.myshopify.com&upgrade=1").get_data(as_text=True)
-    assert_true("Approve charge in Shopify" in embedded_paid, "Shopify billing missing for installed app")
+    assert_true("Approve monthly plan in Shopify" in embedded_paid, "Shopify billing missing for installed app")
     assert_true("PayPal" not in embedded_paid, "PayPal was rendered inside installed Shopify app")
     assert_true('value="embedded-paid.myshopify.com"' in embedded_paid, "embedded Shopify app did not prefill shop")
     upgrade_paid = client.get("/upgrade?shop=embedded-paid.myshopify.com").get_data(as_text=True)
@@ -186,10 +186,10 @@ def test_shopify_billing(mod):
         def json(self):
             return {
                 "data": {
-                    "appPurchaseOneTimeCreate": {
+                    "appSubscriptionCreate": {
                         "userErrors": [],
-                        "appPurchaseOneTime": {"id": "gid://shopify/AppPurchaseOneTime/1"},
-                        "confirmationUrl": "https://demo.myshopify.com/admin/charges/confirm",
+                        "appSubscription": {"id": "gid://shopify/AppSubscription/1", "status": "PENDING"},
+                        "confirmationUrl": "https://demo.myshopify.com/admin/charges/confirm_recurring_application_charge",
                     }
                 }
             }
