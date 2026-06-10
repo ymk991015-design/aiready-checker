@@ -539,9 +539,7 @@ def fetch_shopify_admin_products(shop, limit=20):
             title
             handle
             vendor
-            featuredImage {
-              url
-            }
+            descriptionHtml
             options {
               name
               values
@@ -566,10 +564,7 @@ def fetch_shopify_admin_products(shop, limit=20):
     products = []
     for edge in (((data.get('products') or {}).get('edges')) or []):
         node = edge.get('node') or {}
-        image_url = (
-            ((node.get('featuredImage') or {}).get('url'))
-            or (((node.get('featuredMedia') or {}).get('preview') or {}).get('image') or {}).get('url')
-        )
+        image_url = (((node.get('featuredMedia') or {}).get('preview') or {}).get('image') or {}).get('url')
         variants = []
         for variant_edge in (((node.get('variants') or {}).get('edges')) or []):
             variant = variant_edge.get('node') or {}
@@ -1075,7 +1070,10 @@ async function getShopifySessionToken() {
     if (typeof window.shopify.ready === 'function') {
       await window.shopify.ready();
     }
-    return await window.shopify.idToken();
+    return await Promise.race([
+      window.shopify.idToken(),
+      new Promise(function(resolve) { setTimeout(function() { resolve(''); }, 1500); })
+    ]);
   } catch (e) {
     return '';
   }
@@ -3288,11 +3286,15 @@ def scan():
                     product_urls.append(url)
         except Exception as exc:
             app.logger.warning('Falling back to storefront scan for %s: %s', normalized_shop, exc)
-            if session_shop == normalized_shop or 'GraphQL 401' in str(exc) or 'GraphQL 403' in str(exc):
+            if 'GraphQL 401' in str(exc) or 'GraphQL 403' in str(exc):
                 return jsonify({
                     'error': 'Please reconnect AiReady to Shopify so it can read products from this store.',
                     'redirect': f'/install?shop={normalized_shop}',
                 }), 401
+            return jsonify({
+                'error': 'Could not read products from Shopify Admin API. Please reopen AiReady from Shopify Admin and try again.',
+                'detail': str(exc)[:300],
+            }), 400
             shopify_products = []
             product_urls = []
     if not product_urls:
