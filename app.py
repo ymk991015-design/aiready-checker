@@ -1081,7 +1081,7 @@ HTML_TEMPLATE = """
     <div class="modal-price-sub" id="billingSubtitle">{% if shopify_app_context %}per month via Shopify billing{% else %}one-time via PayPal - unlimited forever{% endif %}</div>
     <div class="pay-store-row">
       <label class="pay-amount-label">店铺域名 Store URL <span style="color:#D72C0D">*</span></label>
-      <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="var paypalShop=document.getElementById('paypalShop'); if (paypalShop) paypalShop.value=this.value; var shopifyShop=document.getElementById('shopifyBillingShop'); if (shopifyShop) shopifyShop.value=this.value" />
+      <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="var paypalShop=document.getElementById('paypalShop'); if (paypalShop) paypalShop.value=this.value; var shopifyBilling=document.getElementById('btnShopifyBilling'); if (shopifyBilling) shopifyBilling.href='/shopify/billing/approve?shop=' + encodeURIComponent(this.value)" />
     </div>
     <div class="modal-features">
       <div class="modal-feature">&#10003; &nbsp; Unlimited AI description generation</div>
@@ -1091,10 +1091,7 @@ HTML_TEMPLATE = """
     </div>
     <div id="modalStep1">
       <div id="shopifyBillingBox" style="display:{% if shopify_app_context %}block{% else %}none{% endif %};margin-bottom:12px;">
-        <form id="shopifyBillingForm" action="/shopify/billing/approve" method="get" target="_top" onsubmit="return prepareShopifyBillingSubmit(event)" style="margin:0;">
-          <input type="hidden" id="shopifyBillingShop" name="shop" value="{{ shop_prefill or '' }}" />
-          <button type="submit" id="btnShopifyBilling" class="btn-primary" style="width:100%;padding:14px;font-size:15px;">Approve monthly plan in Shopify</button>
-        </form>
+        <a id="btnShopifyBilling" href="/shopify/billing/approve?shop={{ shop_prefill|urlencode }}" target="_top" class="btn-primary" style="display:block;width:100%;padding:14px;font-size:15px;text-align:center;text-decoration:none;box-sizing:border-box;">Approve monthly plan in Shopify</a>
         <div class="pay-amount-hint">For installed Shopify stores, payment is approved securely inside Shopify.</div>
         <div id="billingError" style="display:none;margin-top:10px;color:#D72C0D;font-size:13px;line-height:1.45;"></div>
       </div>
@@ -1263,28 +1260,6 @@ function getPaywallShop() {
   var scan = document.getElementById('storeUrl');
   if (scan && scan.value.trim()) return scan.value.trim();
   return '';
-}
-function prepareShopifyBillingSubmit(e) {
-  const shop = getPaywallShop();
-  const errorBox = document.getElementById('billingError');
-  if (errorBox) { errorBox.style.display = 'none'; errorBox.innerHTML = ''; }
-  if (!shop) {
-    if (errorBox) {
-      errorBox.style.display = 'block';
-      errorBox.textContent = 'Please enter your store URL first.';
-    }
-    if (e) e.preventDefault();
-    return false;
-  }
-  var normalizedShop = shop.replace(new RegExp('^https?://'), '').split('/')[0].trim().toLowerCase();
-  if (normalizedShop && normalizedShop.indexOf('.myshopify.com') === -1) {
-    normalizedShop += '.myshopify.com';
-  }
-  const hidden = document.getElementById('shopifyBillingShop');
-  if (hidden) hidden.value = normalizedShop;
-  const btn = document.getElementById('btnShopifyBilling');
-  if (btn) { btn.disabled = true; btn.textContent = 'Opening Shopify...'; }
-  return true;
 }
 {% if not shopify_app_context %}
 async function handlePayPalSubmit(e) {
