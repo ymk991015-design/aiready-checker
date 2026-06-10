@@ -225,7 +225,14 @@ def test_oauth_signed_state_without_cookie(mod):
 
     def fake_post(url, **kwargs):
         if url.endswith("/admin/oauth/access_token"):
-            return Resp({"access_token": "oauth-token", "scope": "read_products,write_products"})
+            assert_true((kwargs.get("json") or {}).get("expiring") == 1, "OAuth did not request expiring offline token")
+            return Resp({
+                "access_token": "oauth-token",
+                "refresh_token": "refresh-token",
+                "expires_in": 3600,
+                "refresh_token_expires_in": 7776000,
+                "scope": "read_products,write_products",
+            })
         return Resp({
             "data": {
                 "webhookSubscriptionCreate": {
@@ -240,6 +247,9 @@ def test_oauth_signed_state_without_cookie(mod):
         callback = fresh_browser.get("/auth/callback?" + urlencode(params))
     assert_true(callback.status_code == 302, f"OAuth callback failed without session cookie: {callback.status_code}")
     assert_true("Invalid state parameter" not in callback.get_data(as_text=True), "signed OAuth state was rejected")
+    token_info = mod.get_shop_token_info("oauth-demo.myshopify.com")
+    assert_true(token_info["has_refresh_token"], "expiring offline refresh token was not saved")
+    assert_true(token_info["expires_at"], "expiring offline access token expiry was not saved")
 
 
 def test_shopify_graphql_admin_api(mod):

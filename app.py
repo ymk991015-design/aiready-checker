@@ -118,9 +118,21 @@ def init_db():
     db_execute(f'''CREATE TABLE IF NOT EXISTS shop_tokens (
         shop TEXT PRIMARY KEY,
         access_token TEXT NOT NULL,
+        refresh_token TEXT DEFAULT '',
+        expires_at INTEGER DEFAULT 0,
+        refresh_token_expires_at INTEGER DEFAULT 0,
         scope TEXT DEFAULT '',
         updated_at {now_type}
     )''')
+    for col, col_type in (
+        ('refresh_token', "TEXT DEFAULT ''"),
+        ('expires_at', 'INTEGER DEFAULT 0'),
+        ('refresh_token_expires_at', 'INTEGER DEFAULT 0'),
+    ):
+        try:
+            db_execute(f'ALTER TABLE shop_tokens ADD COLUMN {col} {col_type}')
+        except Exception:
+            pass
     db_execute(f'''CREATE TABLE IF NOT EXISTS unlock_requests (
         id {id_type},
         email TEXT,
@@ -448,14 +460,59 @@ def delete_shop_data(shop):
     db_execute('DELETE FROM paypal_intents WHERE shop=?', (shop,))
     return True
 
-def save_shop_token(shop, access_token, scope=''):
-    db_execute('''INSERT INTO shop_tokens (shop, access_token, scope, updated_at)
-        VALUES (?, ?, ?, datetime('now'))
+def save_shop_token(shop, access_token, scope='', refresh_token='', expires_in=0, refresh_token_expires_in=0):
+    now = int(time.time())
+    try:
+        expires_at = now + int(expires_in or 0)
+    except (TypeError, ValueError):
+        expires_at = 0
+    try:
+        refresh_token_expires_at = now + int(refresh_token_expires_in or 0)
+    except (TypeError, ValueError):
+        refresh_token_expires_at = 0
+    db_execute('''INSERT INTO shop_tokens (shop, access_token, refresh_token, expires_at, refresh_token_expires_at, scope, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(shop) DO UPDATE SET
             access_token=excluded.access_token,
+            refresh_token=excluded.refresh_token,
+            expires_at=excluded.expires_at,
+            refresh_token_expires_at=excluded.refresh_token_expires_at,
             scope=excluded.scope,
             updated_at=datetime('now')
-    ''', (shop, access_token, scope or ''))
+    ''', (shop, access_token, refresh_token or '', expires_at, refresh_token_expires_at, scope or ''))
+
+def refresh_shop_token(shop):
+    shop = normalize_shop(shop)
+    row = db_execute('SELECT refresh_token FROM shop_tokens WHERE shop=?', (shop,), fetchone=True)
+    refresh_token = row[0] if row else ''
+    if not refresh_token:
+        return ''
+    resp = requests.post(
+        f'https://{shop}/admin/oauth/access_token',
+        data={
+            'client_id': SHOPIFY_CLIENT_ID,
+            'client_secret': SHOPIFY_CLIENT_SECRET,
+            'grant_type': 'refresh_token',
+            'refresh_token': refresh_token,
+        },
+        headers={'Accept': 'application/json'},
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f'Shopify token refresh {resp.status_code}: {resp.text[:500]}')
+    token_data = resp.json()
+    access_token = token_data.get('access_token', '')
+    if not access_token:
+        raise RuntimeError('Shopify token refresh did not return access_token')
+    save_shop_token(
+        shop,
+        access_token,
+        token_data.get('scope', ''),
+        token_data.get('refresh_token', refresh_token),
+        token_data.get('expires_in', 0),
+        token_data.get('refresh_token_expires_in', 0),
+    )
+    return access_token
 
 def shopify_product_gid(product_id):
     product_id = str(product_id or '').strip()
@@ -644,20 +701,34 @@ def sync_shopify_billing_status(shop):
     return False
 
 def get_shop_token(shop):
-    row = db_execute('SELECT access_token FROM shop_tokens WHERE shop=?', (shop,), fetchone=True)
-    return row[0] if row else ''
+    shop = normalize_shop(shop)
+    row = db_execute('SELECT access_token, expires_at, refresh_token FROM shop_tokens WHERE shop=?', (shop,), fetchone=True)
+    if not row:
+        return ''
+    token, expires_at, refresh_token = row[0], row[1] or 0, row[2] or ''
+    try:
+        expires_at = int(expires_at or 0)
+    except (TypeError, ValueError):
+        expires_at = 0
+    if refresh_token and expires_at and expires_at <= int(time.time()) + 120:
+        return refresh_shop_token(shop)
+    return token or ''
 
 def get_shop_token_info(shop):
-    row = db_execute('SELECT access_token, scope, updated_at FROM shop_tokens WHERE shop=?', (shop,), fetchone=True)
+    row = db_execute('SELECT access_token, refresh_token, expires_at, refresh_token_expires_at, scope, updated_at FROM shop_tokens WHERE shop=?', (shop,), fetchone=True)
     if not row:
         return {'has_token': False, 'scope': '', 'updated_at': ''}
     token = row[0] or ''
+    refresh_token = row[1] or ''
     return {
         'has_token': bool(token),
         'token_length': len(token),
         'token_tail': token[-6:] if token else '',
-        'scope': row[1] or '',
-        'updated_at': row[2] or '',
+        'has_refresh_token': bool(refresh_token),
+        'expires_at': row[2] or 0,
+        'refresh_token_expires_at': row[3] or 0,
+        'scope': row[4] or '',
+        'updated_at': row[5] or '',
     }
 
 def has_shop_token(shop):
@@ -3665,6 +3736,7 @@ def auth_callback():
         'client_id': SHOPIFY_CLIENT_ID,
         'client_secret': SHOPIFY_CLIENT_SECRET,
         'code': code,
+        'expiring': 1,
     })
     if resp.status_code != 200:
         return 'Failed to get access token.', 400
@@ -3673,7 +3745,14 @@ def auth_callback():
     access_token = token_data.get('access_token')
     if not access_token:
         return 'Missing access token from Shopify.', 400
-    save_shop_token(shop, access_token, token_data.get('scope', ''))
+    save_shop_token(
+        shop,
+        access_token,
+        token_data.get('scope', ''),
+        token_data.get('refresh_token', ''),
+        token_data.get('expires_in', 0),
+        token_data.get('refresh_token_expires_in', 0),
+    )
     register_app_uninstalled_webhook(shop, access_token)
     session['shop'] = shop
 
