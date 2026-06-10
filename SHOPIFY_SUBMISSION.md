@@ -118,6 +118,15 @@ SHOPIFY_BILLING_TEST=false
 ```
 
 Use `SHOPIFY_BILLING_TEST=true` only when testing billing on a development store.
+Before submitting for Shopify App Store review, set `SHOPIFY_BILLING_TEST=false` in Render so public merchants are charged through Shopify Billing.
+
+Billing approval opens from:
+
+```text
+https://aiready-checker.onrender.com/shopify/billing/approve?shop={shop}.myshopify.com
+```
+
+The upgrade button opens this URL in a new tab and the server redirects to Shopify's official subscription confirmation page.
 
 Required for report email sending:
 

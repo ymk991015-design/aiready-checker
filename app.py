@@ -2972,7 +2972,7 @@ LANDING_TEMPLATE = """
       <ul class="price-features">
         <li class="en">Scan up to 20 products</li><li class="zh">扫描最多 20 个产品</li>
         <li class="en">Full AI Readiness Score</li><li class="zh">完整 AI 评分</li>
-        <li class="en">Scan up to 20 products</li><li class="zh">扫描最多 20 个产品</li>
+        <li class="en">See missing product fields</li><li class="zh">Missing field report</li>
         <li class="en">PDF report download</li><li class="zh">PDF 报告下载</li>
       </ul>
       <a href="/#scan-hero" class="btn-price btn-price-free">

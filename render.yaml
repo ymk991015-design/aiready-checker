@@ -24,7 +24,7 @@ services:
       - key: REPORT_FROM_EMAIL
         sync: false
       - key: SHOPIFY_BILLING_TEST
-        value: "true"
+        value: "false"
       - key: SHOPIFY_BILLING_NAME
         value: AiReady Unlimited
       - key: SHOPIFY_MONTHLY_PRICE

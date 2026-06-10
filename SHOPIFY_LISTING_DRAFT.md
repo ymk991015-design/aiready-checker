@@ -34,7 +34,7 @@ Free plan:
 
 - Scan up to 20 products.
 - View product-level AI readiness scores.
-- Scan up to 20 products.
+- See store-level and product-level missing fields.
 - Download reports.
 
 Unlimited:
@@ -54,7 +54,7 @@ Unlimited:
 5. Open a product row and click "Generate AI Description".
 6. If the store is connected through Shopify OAuth, click "Save to Shopify" to confirm the description update flow.
 7. Click "View plan" or open `/upgrade` to trigger the upgrade modal.
-8. Click "Approve monthly plan in Shopify" to test the Shopify billing approval flow.
+8. Click "Approve monthly plan in Shopify" to open Shopify's billing approval page.
 9. Return to the app and confirm the store shows as unlocked.
 10. Optional: enter an email in the report box to test report subscription capture.
 
