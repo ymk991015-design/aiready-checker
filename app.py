@@ -1605,7 +1605,7 @@ async function cancelShopifySubscription(shop, button) {
   var planText = '';
   var manager = button ? button.closest('.plan-manager') : null;
   var copy = manager ? manager.querySelector('.plan-manager-copy') : null;
-  if (copy) planText = '\n\n' + copy.textContent.trim();
+  if (copy) planText = String.fromCharCode(10, 10) + copy.textContent.trim();
   if (!confirm('Downgrade this store to the free plan and cancel future Shopify Billing renewals?' + planText)) return;
   var oldText = button ? button.textContent : '';
   if (button) {
