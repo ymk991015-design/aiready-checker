@@ -666,11 +666,17 @@ def mark_shop_paid(shop, source):
             paid_at=datetime('now')
     ''', (shop, source))
 
-def sync_shopify_billing_status(shop):
+def clear_shopify_paid(shop):
     shop = normalize_shop(shop)
-    token = get_shop_token(shop)
+    if not shop:
+        return
+    db_execute("DELETE FROM paid_shops WHERE shop=? AND paypal_txn_id LIKE 'shopify_subscription:%'", (shop,))
+
+def fetch_shopify_active_subscriptions(shop, token=None):
+    shop = normalize_shop(shop)
+    token = token or get_shop_token(shop)
     if not shop or not token:
-        return False
+        return []
     query = """
     query CurrentAppSubscriptions {
       currentAppInstallation {
@@ -694,12 +700,19 @@ def sync_shopify_billing_status(shop):
       }
     }
     """
+    data = shopify_graphql(shop, token, query)
+    return ((data.get('currentAppInstallation') or {}).get('activeSubscriptions') or [])
+
+def sync_shopify_billing_status(shop):
+    shop = normalize_shop(shop)
+    token = get_shop_token(shop)
+    if not shop or not token:
+        return False
     try:
-        data = shopify_graphql(shop, token, query)
+        subscriptions = fetch_shopify_active_subscriptions(shop, token)
     except Exception as exc:
         app.logger.warning('Failed to sync Shopify billing for %s: %s', shop, exc)
         return False
-    subscriptions = ((data.get('currentAppInstallation') or {}).get('activeSubscriptions') or [])
     for subscription in subscriptions:
         if subscription.get('name') != SHOPIFY_BILLING_NAME or subscription.get('status') != 'ACTIVE':
             continue
@@ -718,6 +731,7 @@ def sync_shopify_billing_status(shop):
             ):
                 mark_shop_paid(shop, 'shopify_subscription:' + subscription.get('id', 'monthly-subscription'))
                 return True
+    clear_shopify_paid(shop)
     return False
 
 def get_shop_token(shop):
@@ -984,6 +998,13 @@ HTML_TEMPLATE = """
     /* USAGE BADGE */
     .usage-badge { display:inline-flex; align-items:center; gap:6px; background:var(--yellow-bg); border:1px solid var(--yellow-border); color:var(--yellow); border-radius:20px; padding:4px 12px; font-size:12px; font-weight:600; }
     .usage-badge.paid { background:var(--green-bg); border-color:var(--green-border); color:var(--green); }
+    .plan-manager { display:flex; align-items:center; justify-content:space-between; gap:14px; border:1px solid var(--green-border); background:var(--green-bg); border-radius:10px; padding:14px 16px; margin-bottom:12px; flex-wrap:wrap; }
+    .plan-manager-title { font-size:14px; font-weight:700; color:#005E45; margin-bottom:3px; }
+    .plan-manager-copy { font-size:13px; color:var(--text-sub); line-height:1.45; }
+    .plan-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .btn-danger-outline { background:#fff; color:#D72C0D; border:1px solid #FDA29B; border-radius:7px; padding:9px 12px; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit; }
+    .btn-danger-outline:hover { background:#FFF4F2; }
+    .plan-message { width:100%; font-size:13px; color:var(--text-sub); display:none; margin-top:2px; }
 
     /* UPGRADE MODAL */
     .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center; padding:20px; }
@@ -1089,6 +1110,7 @@ HTML_TEMPLATE = """
       <div class="modal-feature">&#10003; &nbsp; Bulk fix all products at once</div>
       <div class="modal-feature">&#10003; &nbsp; Weekly score reports via email</div>
     </div>
+    <div id="modalPlanManager" style="display:none;"></div>
     <div id="modalStep1">
       <div id="shopifyBillingBox" style="display:{% if shopify_app_context %}block{% else %}none{% endif %};margin-bottom:12px;">
         <a id="btnShopifyBilling" href="/shopify/billing/approve?shop={{ shop_prefill|urlencode }}" target="_blank" rel="noopener" class="btn-primary" style="display:block;width:100%;padding:14px;font-size:15px;text-align:center;text-decoration:none;box-sizing:border-box;">Approve monthly plan in Shopify</a>
@@ -1215,13 +1237,30 @@ async function verifyEmbeddedSessionToken() {
 }
 async function refreshBillingMode(shop) {
   var useShopify = !!window.currentShopHasToken;
-  if (!useShopify && shop) {
+  var usage = null;
+  if (shop) {
     try {
       var res = await appFetch('/api/usage?shop=' + encodeURIComponent(shop));
-      var data = await res.json();
-      useShopify = !!data.has_token;
+      usage = await res.json();
+      useShopify = useShopify || !!usage.has_token;
     } catch(e) {}
   }
+  var planBox = document.getElementById('modalPlanManager');
+  var step1 = document.getElementById('modalStep1');
+  if (usage && usage.paid) {
+    if (planBox) {
+      planBox.innerHTML = planManagerHtml(shop, usage);
+      planBox.style.display = 'block';
+    }
+    if (step1) step1.style.display = 'none';
+    setBillingMode(true);
+    return;
+  }
+  if (planBox) {
+    planBox.innerHTML = '';
+    planBox.style.display = 'none';
+  }
+  if (step1) step1.style.display = 'block';
   setBillingMode(useShopify);
 }
 function showUpgradeModal(shop) {
@@ -1397,6 +1436,73 @@ function jsArg(value) {
   return escapeHtml(JSON.stringify(value == null ? '' : value));
 }
 
+function planManagerHtml(shop, usage) {
+  var safeShop = escapeHtml(shop || 'your store');
+  var shopArg = jsArg(shop || '');
+  if (usage && usage.has_token) {
+    return `<div class="plan-manager">
+      <div>
+        <div class="plan-manager-title">&#10003; Current plan: AiReady Unlimited</div>
+        <div class="plan-manager-copy">$${escapeHtml('{{ shopify_monthly_price }}')} per month through Shopify Billing. You can switch back to the free plan at any time.</div>
+      </div>
+      <div class="plan-actions">
+        <button type="button" class="btn-danger-outline" onclick="cancelShopifySubscription(${shopArg}, this)">Downgrade to Free</button>
+      </div>
+      <div class="plan-message" id="planMessage-${escapeHtml((shop || '').replace(/[^a-z0-9]/gi, '-'))}"></div>
+    </div>`;
+  }
+  return `<div class="plan-manager">
+    <div>
+      <div class="plan-manager-title">&#10003; Unlimited plan active</div>
+      <div class="plan-manager-copy">Unlimited access is active for ${safeShop}. Reconnect Shopify from the app to manage Shopify Billing changes.</div>
+    </div>
+    <div class="plan-actions">
+      <a class="btn-secondary" href="/install?shop=${encodeURIComponent(shop || '')}&force=1" style="text-decoration:none;">Reconnect Shopify</a>
+    </div>
+  </div>`;
+}
+
+async function cancelShopifySubscription(shop, button) {
+  var normalizedShop = (shop || getPaywallShop() || '').trim();
+  if (!normalizedShop) {
+    alert('Please enter your store URL first.');
+    return;
+  }
+  if (!confirm('Downgrade this store to the free plan and cancel the Shopify subscription?')) return;
+  var oldText = button ? button.textContent : '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Changing plan...';
+  }
+  try {
+    var res = await appFetch('/shopify/billing/cancel', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({shop: normalizedShop})
+    });
+    var data = await res.json();
+    if (!res.ok || data.error) {
+      if (button) {
+        button.disabled = false;
+        button.textContent = oldText || 'Downgrade to Free';
+      }
+      if (data.redirect) {
+        window.location.href = data.redirect;
+        return;
+      }
+      alert(data.error || 'Could not change the plan. Please try again.');
+      return;
+    }
+    window.location.href = data.redirect || ('/app?shop=' + encodeURIComponent(normalizedShop) + '&plan=free');
+  } catch (err) {
+    if (button) {
+      button.disabled = false;
+      button.textContent = oldText || 'Downgrade to Free';
+    }
+    alert('Could not change the plan. Please try again.');
+  }
+}
+
 function estimateManualMinutes(products) {
   const issueCount = (products || []).reduce((sum, p) => sum + ((p.missing || []).length), 0);
   return Math.max(10, Math.round(issueCount * 4));
@@ -1440,7 +1546,7 @@ window.renderResults = function renderResults(data) {
       const el = document.getElementById('usageBadge');
       if (!el) return;
       if (u.paid) {
-        el.innerHTML = '<span class="usage-badge paid">&#10003; Unlimited plan</span>';
+        el.innerHTML = planManagerHtml(s.store, u);
       } else {
         const limit = u.free_product_limit || 20;
         el.innerHTML = `<span class="usage-badge">Free scan: up to ${limit} products &mdash; <a href="#" onclick="showUpgradeModal(${jsArg(s.store)});return false;" style="color:var(--yellow);text-decoration:underline;">View plan</a></span>`;
@@ -2260,7 +2366,7 @@ function initPaywallApp() {
     var banner = document.getElementById('unlimitedBanner');
     if (banner) {
       banner.style.display = 'block';
-      banner.innerHTML = '&#10003; <strong>Unlimited plan active</strong> &mdash; unlimited AI fixes for ' + (shop ? escapeHtml(shop) : 'your store');
+      banner.innerHTML = '&#10003; <strong>Unlimited plan active</strong> &mdash; unlimited AI fixes for ' + (shop ? escapeHtml(shop) : 'your store') + ' <a href="#" onclick="showUpgradeModal(' + jsArg(shop) + ');return false;" style="margin-left:10px;color:#005E45;text-decoration:underline;">Manage plan</a>';
     }
     if (shop && storeInput) {
       storeInput.value = shop;
@@ -2272,6 +2378,15 @@ function initPaywallApp() {
     closeUpgradeModal();
     if (shop && !document.getElementById('results').innerHTML) runScan();
     return;
+  }
+  if (params.get('plan') === 'free') {
+    shop = shop || '';
+    var freeBanner = document.getElementById('unlimitedBanner');
+    if (freeBanner) {
+      freeBanner.style.display = 'block';
+      freeBanner.innerHTML = '<strong>Plan changed:</strong> ' + (shop ? escapeHtml(shop) : 'your store') + ' is now on the free plan.';
+    }
+    if (shop && storeInput) storeInput.value = shop;
   }
   if (isPaywall) {
     showUpgradeModal(shop || (storeInput && storeInput.value.trim()) || '');
@@ -3573,6 +3688,87 @@ def create_shopify_billing_confirmation(shop):
 def shopify_billing_start():
     data = request.get_json() or {}
     payload = create_shopify_billing_confirmation(data.get('shop', session.get('shop', '')))
+    status = payload.pop('status', 200)
+    return jsonify(payload), status
+
+def cancel_shopify_billing_subscription(shop):
+    shop = normalize_shop(shop)
+    try:
+        token = get_shop_token(shop)
+    except Exception as exc:
+        app.logger.warning('Failed to load Shopify token for cancellation %s: %s', shop, exc)
+        return {
+            'error': 'Please reconnect AiReady to Shopify before changing the plan.',
+            'redirect': f'/install?shop={shop}&force=1',
+            'status': 401,
+        }
+    if not shop or not token:
+        return {
+            'error': 'Install or reconnect the Shopify app before changing the plan.',
+            'redirect': f'/install?shop={shop}&force=1' if shop else '',
+            'status': 401,
+        }
+    try:
+        subscriptions = fetch_shopify_active_subscriptions(shop, token)
+        active_subscription = next(
+            (
+                subscription for subscription in subscriptions
+                if subscription.get('name') == SHOPIFY_BILLING_NAME
+                and subscription.get('status') == 'ACTIVE'
+            ),
+            None,
+        )
+        if not active_subscription:
+            clear_shopify_paid(shop)
+            return {'success': True, 'already_free': True, 'status': 200}
+
+        mutation = """
+        mutation AppSubscriptionCancel($id: ID!, $prorate: Boolean) {
+          appSubscriptionCancel(id: $id, prorate: $prorate) {
+            userErrors { field message }
+            appSubscription { id status }
+          }
+        }
+        """
+        data = shopify_graphql(shop, token, mutation, {
+            'id': active_subscription.get('id'),
+            'prorate': False,
+        })
+        payload = data.get('appSubscriptionCancel') or {}
+        errors = payload.get('userErrors') or []
+        if errors:
+            return {'error': '; '.join(e.get('message', 'Billing error') for e in errors), 'status': 400}
+        clear_shopify_paid(shop)
+        return {
+            'success': True,
+            'subscription': payload.get('appSubscription') or {},
+            'redirect': f'/app?shop={shop}&plan=free',
+            'status': 200,
+        }
+    except Exception as exc:
+        app.logger.warning('Failed to cancel Shopify billing for %s: %s', shop, exc)
+        if (
+            'GraphQL 401' in str(exc)
+            or 'GraphQL 403' in str(exc)
+            or 'Non-expiring access tokens' in str(exc)
+        ):
+            return {
+                'error': 'Please reconnect AiReady to Shopify before changing the plan.',
+                'redirect': f'/install?shop={shop}&force=1',
+                'status': 401,
+            }
+        return {'error': f'Could not change the Shopify plan: {str(exc)[:220]}', 'status': 500}
+
+
+@app.route('/shopify/billing/cancel', methods=['POST'])
+def shopify_billing_cancel():
+    data = request.get_json() or {}
+    shop = normalize_shop(data.get('shop', session.get('shop', '')))
+    token_payload = current_shopify_session()
+    token_shop = normalize_shop((token_payload or {}).get('dest', '').replace('https://', ''))
+    if token_shop and shop and token_shop != shop:
+        return jsonify({'error': 'Session token shop does not match requested shop.'}), 403
+    payload = cancel_shopify_billing_subscription(shop)
     status = payload.pop('status', 200)
     return jsonify(payload), status
 

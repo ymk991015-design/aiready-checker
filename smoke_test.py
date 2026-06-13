@@ -71,6 +71,8 @@ def test_pages(mod):
     assert_true(embedded_landing.headers.get("Location", "").startswith("/app?"), "embedded landing redirect target wrong")
     assert_true('href="/privacy"' in app_html and 'href="/terms"' in app_html, "app legal links missing")
     assert_true("Approve monthly plan in Shopify" in app_html, "Shopify billing button missing")
+    assert_true("Downgrade to Free" in app_html, "Shopify plan downgrade button missing")
+    assert_true("/shopify/billing/cancel" in app_html, "Shopify billing cancel endpoint missing from app UI")
     assert_true("You've used your 5 free actions" not in app_html, "old action-limit paywall text still visible")
     assert_true("free actions remaining" not in app_html, "old action remaining badge still visible")
     assert_true("$9.99" in app_html, "monthly price missing from app")
@@ -224,6 +226,57 @@ def test_shopify_billing(mod):
         rejected = client.post("/shopify/billing/start", json={"shop": "demo.myshopify.com"})
     assert_true(rejected.status_code == 401, "billing did not request reconnect for rejected token")
     assert_true(rejected.get_json().get("redirect") == "/install?shop=demo.myshopify.com&force=1", "billing reconnect redirect missing")
+
+    mod.mark_shop_paid("demo.myshopify.com", "shopify_subscription:gid://shopify/AppSubscription/1")
+
+    class GraphQLResp:
+        status_code = 200
+
+        def __init__(self, payload):
+            self._payload = payload
+            self.text = json.dumps(payload)
+
+        def json(self):
+            return self._payload
+
+    def billing_post(*args, **kwargs):
+        query = (kwargs.get("json") or {}).get("query", "")
+        if "appSubscriptionCancel" in query:
+            return GraphQLResp({
+                "data": {
+                    "appSubscriptionCancel": {
+                        "userErrors": [],
+                        "appSubscription": {"id": "gid://shopify/AppSubscription/1", "status": "CANCELLED"},
+                    }
+                }
+            })
+        return GraphQLResp({
+            "data": {
+                "currentAppInstallation": {
+                    "activeSubscriptions": [{
+                        "id": "gid://shopify/AppSubscription/1",
+                        "name": mod.SHOPIFY_BILLING_NAME,
+                        "status": "ACTIVE",
+                        "test": False,
+                        "lineItems": [{
+                            "plan": {
+                                "pricingDetails": {
+                                    "__typename": "AppRecurringPricing",
+                                    "interval": "EVERY_30_DAYS",
+                                    "price": {"amount": str(mod.SHOPIFY_MONTHLY_PRICE), "currencyCode": "USD"},
+                                }
+                            }
+                        }],
+                    }]
+                }
+            }
+        })
+
+    with patch("app.requests.post", side_effect=billing_post):
+        cancelled = client.post("/shopify/billing/cancel", json={"shop": "demo.myshopify.com"})
+    assert_true(cancelled.status_code == 200, f"billing cancel failed {cancelled.status_code}")
+    assert_true(cancelled.get_json().get("success"), "billing cancel did not return success")
+    assert_true(not mod.is_paid("demo.myshopify.com"), "billing cancel did not downgrade local plan")
 
 
 def test_oauth_signed_state_without_cookie(mod):
