@@ -680,7 +680,7 @@ def clear_shopify_paid(shop):
     shop = normalize_shop(shop)
     if not shop:
         return
-    db_execute("DELETE FROM paid_shops WHERE shop=? AND paypal_txn_id LIKE 'shopify_subscription:%'", (shop,))
+    db_execute("DELETE FROM paid_shops WHERE shop=? AND paypal_txn_id LIKE ?", (shop, 'shopify_subscription:%'))
 
 def fetch_shopify_active_subscriptions(shop, token=None):
     shop = normalize_shop(shop)
