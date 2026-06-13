@@ -695,6 +695,7 @@ def fetch_shopify_active_subscriptions(shop, token=None):
           name
           status
           test
+          currentPeriodEnd
           lineItems {
             plan {
               pricingDetails {
@@ -747,6 +748,25 @@ def sync_shopify_billing_status(shop):
                 return True
     clear_shopify_paid(shop)
     return False
+
+def get_shopify_subscription_summary(shop):
+    shop = normalize_shop(shop)
+    try:
+        token = get_shop_token(shop)
+        subscriptions = fetch_shopify_active_subscriptions(shop, token)
+    except Exception as exc:
+        app.logger.warning('Failed to load Shopify subscription summary for %s: %s', shop, exc)
+        return {}
+    for subscription in subscriptions:
+        if subscription.get('name') == SHOPIFY_BILLING_NAME and subscription.get('status') == 'ACTIVE':
+            return {
+                'id': subscription.get('id', ''),
+                'name': subscription.get('name', ''),
+                'status': subscription.get('status', ''),
+                'test': bool(subscription.get('test')),
+                'current_period_end': subscription.get('currentPeriodEnd') or '',
+            }
+    return {}
 
 def get_shop_token(shop):
     shop = normalize_shop(shop)
@@ -1286,7 +1306,7 @@ async function refreshBillingMode(shop) {
     if (features) features.classList.add('is-hidden');
     if (storeRow) storeRow.classList.add('is-hidden');
     if (planBox) {
-      planBox.innerHTML = billingPlanManagementHtml(usage.shop || shop);
+      planBox.innerHTML = billingPlanManagementHtml(usage.shop || shop, usage);
       planBox.style.display = 'block';
     }
     if (step1) step1.style.display = 'none';
@@ -1482,14 +1502,25 @@ function jsArg(value) {
   return escapeHtml(JSON.stringify(value == null ? '' : value));
 }
 
+function formatBillingDate(value) {
+  if (!value) return '';
+  try {
+    return new Date(value).toLocaleDateString(undefined, {year: 'numeric', month: 'short', day: 'numeric'});
+  } catch (e) {
+    return String(value).slice(0, 10);
+  }
+}
+
 function planManagerHtml(shop, usage) {
   var safeShop = escapeHtml(shop || 'your store');
   var shopArg = jsArg(shop || '');
+  var periodEnd = formatBillingDate(usage && (usage.current_period_end || (usage.subscription || {}).current_period_end));
+  var periodCopy = periodEnd ? ` Current billing period ends on ${escapeHtml(periodEnd)}.` : '';
   if (usage && usage.has_token) {
     return `<div class="plan-manager">
       <div>
         <div class="plan-manager-title">&#10003; Current plan: AiReady Unlimited</div>
-        <div class="plan-manager-copy">$${escapeHtml('{{ shopify_monthly_price }}')} per month through Shopify Billing for ${safeShop}.</div>
+        <div class="plan-manager-copy">$${escapeHtml('{{ shopify_monthly_price }}')} per month through Shopify Billing for ${safeShop}.${periodCopy}</div>
       </div>
       <div class="plan-actions">
         <button type="button" class="btn-secondary" onclick="showUpgradeModal(${shopArg})">Manage plan</button>
@@ -1508,13 +1539,17 @@ function planManagerHtml(shop, usage) {
   </div>`;
 }
 
-function billingPlanManagementHtml(shop) {
+function billingPlanManagementHtml(shop, usage) {
   var safeShop = escapeHtml(shop || 'your store');
   var shopArg = jsArg(shop || '');
+  var periodEnd = formatBillingDate(usage && (usage.current_period_end || (usage.subscription || {}).current_period_end));
+  var periodCopy = periodEnd
+    ? `Your current billing period ends on ${escapeHtml(periodEnd)}. If you downgrade, Shopify will stop future renewals for this subscription.`
+    : 'If you downgrade, Shopify will stop future renewals for this subscription.';
   return `<div class="plan-manager modal-plan-manager">
     <div>
       <div class="plan-manager-title">&#10003; Current plan: AiReady Unlimited</div>
-      <div class="plan-manager-copy">$${escapeHtml('{{ shopify_monthly_price }}')} per month through Shopify Billing for ${safeShop}. You can switch back to the free plan at any time.</div>
+      <div class="plan-manager-copy">$${escapeHtml('{{ shopify_monthly_price }}')} per month through Shopify Billing for ${safeShop}. ${periodCopy}</div>
     </div>
     <div class="plan-actions">
       <button type="button" class="btn-danger-outline" onclick="cancelShopifySubscription(${shopArg}, this)">Downgrade to Free</button>
@@ -1567,7 +1602,11 @@ async function cancelShopifySubscription(shop, button) {
     alert('Please enter your store URL first.');
     return;
   }
-  if (!confirm('Downgrade this store to the free plan and cancel the Shopify subscription?')) return;
+  var planText = '';
+  var manager = button ? button.closest('.plan-manager') : null;
+  var copy = manager ? manager.querySelector('.plan-manager-copy') : null;
+  if (copy) planText = '\n\n' + copy.textContent.trim();
+  if (!confirm('Downgrade this store to the free plan and cancel future Shopify Billing renewals?' + planText)) return;
   var oldText = button ? button.textContent : '';
   if (button) {
     button.disabled = true;
@@ -3672,9 +3711,12 @@ def api_usage():
         sync_shopify_billing_status(normalized)
         shop = normalized
     paid = is_paid(shop)
+    subscription = get_shopify_subscription_summary(shop) if paid and has_shop_token(shop) else {}
     return jsonify({
         'shop': shop,
         'paid': paid,
+        'subscription': subscription,
+        'current_period_end': subscription.get('current_period_end', ''),
         'product_limit': PAID_PRODUCT_LIMIT if paid else FREE_PRODUCT_LIMIT,
         'free_product_limit': FREE_PRODUCT_LIMIT,
         'has_token': has_shop_token(shop),
@@ -3844,12 +3886,13 @@ def cancel_shopify_billing_subscription(shop):
         if not active_subscription:
             clear_shopify_paid(shop)
             return {'success': True, 'already_free': True, 'status': 200}
+        current_period_end = active_subscription.get('currentPeriodEnd') or ''
 
         mutation = """
         mutation AppSubscriptionCancel($id: ID!, $prorate: Boolean) {
           appSubscriptionCancel(id: $id, prorate: $prorate) {
             userErrors { field message }
-            appSubscription { id status }
+            appSubscription { id status currentPeriodEnd }
           }
         }
         """
@@ -3865,6 +3908,7 @@ def cancel_shopify_billing_subscription(shop):
         return {
             'success': True,
             'subscription': payload.get('appSubscription') or {},
+            'current_period_end': current_period_end,
             'redirect': f'/app?shop={shop}&plan=free',
             'status': 200,
         }
