@@ -64,6 +64,16 @@ def add_security_headers(response):
     response.headers.setdefault('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
     return response
 
+@app.errorhandler(500)
+def handle_server_error(error):
+    if request.path == '/scan':
+        original = getattr(error, 'original_exception', None)
+        app.logger.error('Scan failed with server error: %s', original or error)
+        return jsonify({
+            'error': 'Temporary server error while scanning this store. Please reopen AiReady from Shopify Admin and try again.',
+        }), 500
+    return error
+
 def db_connect():
     if USE_POSTGRES:
         import psycopg2
@@ -705,7 +715,11 @@ def fetch_shopify_active_subscriptions(shop, token=None):
 
 def sync_shopify_billing_status(shop):
     shop = normalize_shop(shop)
-    token = get_shop_token(shop)
+    try:
+        token = get_shop_token(shop)
+    except Exception as exc:
+        app.logger.warning('Failed to load Shopify token while syncing billing for %s: %s', shop, exc)
+        return False
     if not shop or not token:
         return False
     try:
@@ -766,7 +780,11 @@ def get_shop_token_info(shop):
     }
 
 def has_shop_token(shop):
-    return bool(get_shop_token(shop))
+    try:
+        return bool(get_shop_token(shop))
+    except Exception as exc:
+        app.logger.warning('Failed to load Shopify token for %s: %s', normalize_shop(shop), exc)
+        return False
 
 def shopify_app_home_url(host):
     if not host or not SHOPIFY_CLIENT_ID:

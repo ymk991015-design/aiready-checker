@@ -117,6 +117,15 @@ def test_pages(mod):
     )
     assert_true(reconnect.status_code == 401, "scan without offline token did not request reconnect")
     assert_true(reconnect.get_json().get("redirect") == "/install?shop=needs-reconnect.myshopify.com&force=1", "reconnect redirect missing")
+    broken_token = make_shopify_session_token("smoke-client", "smoke-secret", "broken-token.myshopify.com")
+    with patch("app.get_shop_token", side_effect=RuntimeError("token refresh failed")):
+        broken = client.post(
+            "/scan",
+            json={"url": "broken-token.myshopify.com"},
+            headers={"Authorization": f"Bearer {broken_token}"},
+        )
+    assert_true(broken.status_code == 401, "scan returned server error instead of reconnect for broken Shopify token")
+    assert_true(broken.get_json().get("redirect") == "/install?shop=broken-token.myshopify.com&force=1", "broken token reconnect redirect missing")
 
 
 def test_admin_requires_configured_secret(mod):
