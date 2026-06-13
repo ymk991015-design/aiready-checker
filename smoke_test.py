@@ -343,6 +343,14 @@ def test_oauth_signed_state_without_cookie(mod):
 def test_shopify_graphql_admin_api(mod):
     client = mod.app.test_client()
     mod.save_shop_token("graphql-demo.myshopify.com", "token", "read_products,write_products")
+    malformed_schema = mod.schema_from_shopify_product({
+        "id": "bad",
+        "title": "Malformed Product",
+        "options": [{"name": None, "values": None}, None],
+        "images": [None],
+        "variants": [{"sku": "SKU", "barcode": ""}],
+    })
+    assert_true(malformed_schema["name"] == "Malformed Product", "malformed Shopify product was not normalized")
     calls = []
 
     class Resp:

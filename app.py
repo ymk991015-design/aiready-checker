@@ -2508,15 +2508,24 @@ def schema_from_shopify_product(data):
     """Build schema dict from Shopify products.json entry (no extra HTTP)."""
     if not data:
         return None
-    variants = data.get('variants', [])
-    options = {o['name'].lower(): o.get('values', []) for o in data.get('options', [])}
-    images = data.get('images', [])
+    variants = data.get('variants', []) if isinstance(data.get('variants', []), list) else []
+    options = {}
+    for option in (data.get('options') or []):
+        if not isinstance(option, dict):
+            continue
+        name = str(option.get('name') or '').strip().lower()
+        if name:
+            values = option.get('values') or []
+            options[name] = values if isinstance(values, list) else [values]
+    images = data.get('images', []) if isinstance(data.get('images', []), list) else []
+    first_image = images[0] if images else {}
+    image_src = first_image.get('src') if isinstance(first_image, dict) else first_image
     schema = {
         '@type': 'Product',
         '_shopify_id': str(data.get('id', '')),
         'name': data.get('title', ''),
         'description': data.get('body_html', ''),
-        'image': images[0].get('src') if images else None,
+        'image': image_src,
         'brand': data.get('vendor', ''),
         'sku': variants[0].get('sku', '') if variants else '',
         'offers': {
@@ -3516,10 +3525,21 @@ def scan():
             'vendor': schema.get('brand', ''),
         }
     if product_by_handle:
-        raw = [scan_one(u) for u in product_urls]
+        raw = []
+        for url in product_urls:
+            try:
+                raw.append(scan_one(url))
+            except Exception as exc:
+                app.logger.warning('Skipping Shopify product during scan for %s: %s', normalized_shop or store_url, exc)
     else:
+        def safe_scan_one(url):
+            try:
+                return scan_one(url)
+            except Exception as exc:
+                app.logger.warning('Skipping storefront product during scan for %s: %s', store_url, exc)
+                return None
         with ThreadPoolExecutor(max_workers=6) as executor:
-            raw = list(executor.map(scan_one, product_urls))
+            raw = list(executor.map(safe_scan_one, product_urls))
     results = [r for r in raw if r is not None]
     if not results:
         return jsonify({'error': 'Could not extract schema from product pages. The store may require JavaScript rendering.'})
