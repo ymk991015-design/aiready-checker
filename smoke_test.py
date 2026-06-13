@@ -74,6 +74,7 @@ def test_pages(mod):
     assert_true('id="planStatusCard"' in app_html, "plan status card missing")
     assert_true("Current plan: Free" in app_html, "free plan status copy missing")
     assert_true("Upgrade plan" in app_html, "plan upgrade action missing")
+    assert_true("Manage subscription" in app_html, "paid plan management modal copy missing")
     assert_true("Downgrade to Free" in app_html, "Shopify plan downgrade button missing")
     assert_true("/shopify/billing/cancel" in app_html, "Shopify billing cancel endpoint missing from app UI")
     assert_true("You've used your 5 free actions" not in app_html, "old action-limit paywall text still visible")

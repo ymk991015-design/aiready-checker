@@ -1032,6 +1032,7 @@ HTML_TEMPLATE = """
     .modal-title { font-size:20px; font-weight:700; color:var(--text); margin-bottom:8px; }
     .modal-sub { font-size:14px; color:var(--text-sub); margin-bottom:24px; line-height:1.6; }
     .modal-price { font-size:32px; font-weight:800; color:var(--green); margin-bottom:4px; }
+    .modal-price.is-hidden, .modal-price-sub.is-hidden, .modal-features.is-hidden, .pay-store-row.is-hidden { display:none; }
     .modal-price-cny { font-size:22px; color:var(--text-sub); font-weight:700; margin-left:6px; }
     .modal-price-sub { font-size:13px; color:var(--text-sub); margin-bottom:24px; }
     .modal-rate-note { font-size:12px; color:var(--text-hint); margin-top:-18px; margin-bottom:20px; }
@@ -1267,7 +1268,21 @@ async function refreshBillingMode(shop) {
   }
   var planBox = document.getElementById('modalPlanManager');
   var step1 = document.getElementById('modalStep1');
+  var icon = document.querySelector('#upgradeModal .modal-icon');
+  var title = document.querySelector('#upgradeModal .modal-title');
+  var sub = document.querySelector('#upgradeModal .modal-sub');
+  var price = document.querySelector('#upgradeModal .modal-price');
+  var priceSub = document.getElementById('billingSubtitle');
+  var features = document.querySelector('#upgradeModal .modal-features');
+  var storeRow = document.querySelector('#upgradeModal .pay-store-row');
   if (usage && usage.paid) {
+    if (icon) icon.innerHTML = '&#10003;';
+    if (title) title.textContent = 'Manage subscription';
+    if (sub) sub.textContent = 'Your Shopify Billing plan is active. You can keep using AiReady Unlimited or switch back to the free plan.';
+    if (price) price.classList.add('is-hidden');
+    if (priceSub) priceSub.classList.add('is-hidden');
+    if (features) features.classList.add('is-hidden');
+    if (storeRow) storeRow.classList.add('is-hidden');
     if (planBox) {
       planBox.innerHTML = billingPlanManagementHtml(usage.shop || shop);
       planBox.style.display = 'block';
@@ -1276,6 +1291,15 @@ async function refreshBillingMode(shop) {
     setBillingMode(true);
     return;
   }
+  if (icon) icon.innerHTML = '&#128274;';
+  if (title) title.textContent = 'Upgrade to Unlimited';
+  if (sub) sub.textContent = useShopify
+    ? 'Monthly Shopify billing unlocks unlimited AI fixes, descriptions, and saves for your store.'
+    : 'Upgrade to scan more products and unlock unlimited AI fixes, descriptions, and saves for your store.';
+  if (price) price.classList.remove('is-hidden');
+  if (priceSub) priceSub.classList.remove('is-hidden');
+  if (features) features.classList.remove('is-hidden');
+  if (storeRow) storeRow.classList.remove('is-hidden');
   if (planBox) {
     planBox.innerHTML = '';
     planBox.style.display = 'none';
@@ -1299,8 +1323,8 @@ function showUpgradeModal(shop) {
       title.textContent = 'Upgrade to Unlimited';
       sub.textContent = 'One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.';
     } else {
-      title.textContent = 'Upgrade to Unlimited';
-      sub.textContent = 'Upgrade to scan more products and unlock unlimited AI fixes, descriptions, and saves for your store.';
+      title.textContent = 'Manage plan';
+      sub.textContent = 'Review your current plan or choose the plan that fits your store.';
     }
   }
   var step1 = document.getElementById('modalStep1');
