@@ -1020,6 +1020,8 @@ HTML_TEMPLATE = """
     .plan-manager-title { font-size:14px; font-weight:700; color:#005E45; margin-bottom:3px; }
     .plan-manager-copy { font-size:13px; color:var(--text-sub); line-height:1.45; }
     .plan-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .modal-plan-manager { justify-content:center; text-align:center; }
+    .modal-plan-manager .plan-actions { width:100%; justify-content:center; }
     .btn-danger-outline { background:#fff; color:#D72C0D; border:1px solid #FDA29B; border-radius:7px; padding:9px 12px; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit; }
     .btn-danger-outline:hover { background:#FFF4F2; }
     .plan-message { width:100%; font-size:13px; color:var(--text-sub); display:none; margin-top:2px; }
@@ -1509,7 +1511,7 @@ function planManagerHtml(shop, usage) {
 function billingPlanManagementHtml(shop) {
   var safeShop = escapeHtml(shop || 'your store');
   var shopArg = jsArg(shop || '');
-  return `<div class="plan-manager">
+  return `<div class="plan-manager modal-plan-manager">
     <div>
       <div class="plan-manager-title">&#10003; Current plan: AiReady Unlimited</div>
       <div class="plan-manager-copy">$${escapeHtml('{{ shopify_monthly_price }}')} per month through Shopify Billing for ${safeShop}. You can switch back to the free plan at any time.</div>
