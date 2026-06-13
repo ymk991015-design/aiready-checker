@@ -1100,6 +1100,7 @@ HTML_TEMPLATE = """
     </form>
   </div>
 
+  <div id="planStatusCard" style="display:none;"></div>
   <div id="unlimitedBanner" style="display:none;" class="success-banner"></div>
   <div class="feature-cards" id="featureCards">
     <div class="fcard"><div class="fcard-icon">&#128202;</div><div><div class="fcard-title">Score every product</div><div class="fcard-desc">13 structured data fields. See what&apos;s missing and the GEO score impact.</div></div></div>
@@ -1250,6 +1251,7 @@ async function verifyEmbeddedSessionToken() {
       if (label) label.textContent = data.shop;
       if (banner) banner.classList.add('visible');
       setBillingMode(true);
+      refreshPlanStatus(data.shop);
     }
   } catch (e) {}
 }
@@ -1480,6 +1482,45 @@ function planManagerHtml(shop, usage) {
   </div>`;
 }
 
+function freePlanHtml(shop) {
+  var safeShop = escapeHtml(shop || 'your store');
+  var shopArg = jsArg(shop || '');
+  return `<div class="plan-manager">
+    <div>
+      <div class="plan-manager-title">Current plan: Free</div>
+      <div class="plan-manager-copy">Free scan: up to {{ free_product_limit }} products for ${safeShop}. Upgrade through Shopify Billing when you need more scans and AI fixes.</div>
+    </div>
+    <div class="plan-actions">
+      <button type="button" class="btn-primary" onclick="showUpgradeModal(${shopArg})">Upgrade plan</button>
+    </div>
+  </div>`;
+}
+
+async function refreshPlanStatus(shop) {
+  var card = document.getElementById('planStatusCard');
+  if (!card) return;
+  var normalizedShop = (shop || getPaywallShop() || '').trim();
+  if (!normalizedShop) {
+    card.style.display = 'none';
+    card.innerHTML = '';
+    return;
+  }
+  try {
+    var res = await appFetch('/api/usage?shop=' + encodeURIComponent(normalizedShop));
+    var usage = await res.json();
+    if (!res.ok || usage.error) {
+      card.style.display = 'none';
+      card.innerHTML = '';
+      return;
+    }
+    card.innerHTML = usage.paid ? planManagerHtml(usage.shop || normalizedShop, usage) : freePlanHtml(usage.shop || normalizedShop);
+    card.style.display = 'block';
+  } catch (e) {
+    card.style.display = 'none';
+    card.innerHTML = '';
+  }
+}
+
 async function cancelShopifySubscription(shop, button) {
   var normalizedShop = (shop || getPaywallShop() || '').trim();
   if (!normalizedShop) {
@@ -1511,6 +1552,7 @@ async function cancelShopifySubscription(shop, button) {
       alert(data.error || 'Could not change the plan. Please try again.');
       return;
     }
+    refreshPlanStatus(normalizedShop);
     window.location.href = data.redirect || ('/app?shop=' + encodeURIComponent(normalizedShop) + '&plan=free');
   } catch (err) {
     if (button) {
@@ -1544,6 +1586,7 @@ window.renderResults = function renderResults(data) {
   window.currentShopHasToken = !!(data.summary && data.summary.has_token);
   const results = document.getElementById('results');
   const s = data.summary;
+  refreshPlanStatus(s.store);
   const totalIssues = data.products.reduce((a,p) => a + (p.missing || []).length, 0);
   const maxCount = s.top_issues.length ? s.top_issues[0].count : 1;
   const scoreCol = s.avg_score >= 70 ? 'metric-green' : s.avg_score >= 40 ? 'metric-yellow' : 'metric-red';
@@ -2198,6 +2241,7 @@ function renderBasicResults(data) {
   lastData = data;
   window.lastData = data;
   var s = data.summary;
+  refreshPlanStatus(s.store);
   var products = data.products || [];
   var totalIssues = 0;
   var i, p, sc, passCount, failCount;
@@ -2374,6 +2418,7 @@ function initPaywallApp() {
   var storeInput = document.getElementById('storeUrl');
   var path = window.location.pathname;
   var isPaywall = path === '/upgrade' || params.get('upgrade') === '1';
+  refreshPlanStatus(shop || (storeInput && storeInput.value.trim()) || '');
   if (params.get('paypal') === 'return') {
     showUpgradeModal(shop || (storeInput && storeInput.value.trim()) || '');
     showPaidStep();
