@@ -1269,7 +1269,7 @@ async function refreshBillingMode(shop) {
   var step1 = document.getElementById('modalStep1');
   if (usage && usage.paid) {
     if (planBox) {
-      planBox.innerHTML = planManagerHtml(shop, usage);
+      planBox.innerHTML = billingPlanManagementHtml(usage.shop || shop);
       planBox.style.display = 'block';
     }
     if (step1) step1.style.display = 'none';
@@ -1463,10 +1463,10 @@ function planManagerHtml(shop, usage) {
     return `<div class="plan-manager">
       <div>
         <div class="plan-manager-title">&#10003; Current plan: AiReady Unlimited</div>
-        <div class="plan-manager-copy">$${escapeHtml('{{ shopify_monthly_price }}')} per month through Shopify Billing. You can switch back to the free plan at any time.</div>
+        <div class="plan-manager-copy">$${escapeHtml('{{ shopify_monthly_price }}')} per month through Shopify Billing for ${safeShop}.</div>
       </div>
       <div class="plan-actions">
-        <button type="button" class="btn-danger-outline" onclick="cancelShopifySubscription(${shopArg}, this)">Downgrade to Free</button>
+        <button type="button" class="btn-secondary" onclick="showUpgradeModal(${shopArg})">Manage plan</button>
       </div>
       <div class="plan-message" id="planMessage-${escapeHtml((shop || '').replace(/[^a-z0-9]/gi, '-'))}"></div>
     </div>`;
@@ -1478,6 +1478,20 @@ function planManagerHtml(shop, usage) {
     </div>
     <div class="plan-actions">
       <a class="btn-secondary" href="/install?shop=${encodeURIComponent(shop || '')}&force=1" style="text-decoration:none;">Reconnect Shopify</a>
+    </div>
+  </div>`;
+}
+
+function billingPlanManagementHtml(shop) {
+  var safeShop = escapeHtml(shop || 'your store');
+  var shopArg = jsArg(shop || '');
+  return `<div class="plan-manager">
+    <div>
+      <div class="plan-manager-title">&#10003; Current plan: AiReady Unlimited</div>
+      <div class="plan-manager-copy">$${escapeHtml('{{ shopify_monthly_price }}')} per month through Shopify Billing for ${safeShop}. You can switch back to the free plan at any time.</div>
+    </div>
+    <div class="plan-actions">
+      <button type="button" class="btn-danger-outline" onclick="cancelShopifySubscription(${shopArg}, this)">Downgrade to Free</button>
     </div>
   </div>`;
 }
@@ -1607,7 +1621,7 @@ window.renderResults = function renderResults(data) {
       const el = document.getElementById('usageBadge');
       if (!el) return;
       if (u.paid) {
-        el.innerHTML = planManagerHtml(s.store, u);
+        el.innerHTML = '<span class="usage-badge paid">&#10003; Unlimited plan active &mdash; <a href="#" onclick="showUpgradeModal(' + jsArg(s.store) + ');return false;" style="color:var(--green);text-decoration:underline;">Manage plan</a></span>';
       } else {
         const limit = u.free_product_limit || 20;
         el.innerHTML = `<span class="usage-badge">Free scan: up to ${limit} products &mdash; <a href="#" onclick="showUpgradeModal(${jsArg(s.store)});return false;" style="color:var(--yellow);text-decoration:underline;">View plan</a></span>`;
