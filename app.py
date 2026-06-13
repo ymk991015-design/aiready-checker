@@ -1143,7 +1143,7 @@ HTML_TEMPLATE = """
     <div class="modal-price">{% if shopify_app_context %}${{ shopify_monthly_price }}{% else %}${{ paypal_price }}{% endif %}</div>
     <div class="modal-price-sub" id="billingSubtitle">{% if shopify_app_context %}per month via Shopify billing{% else %}one-time via PayPal - unlimited forever{% endif %}</div>
     <div class="pay-store-row">
-      <label class="pay-amount-label">店铺域名 Store URL <span style="color:#D72C0D">*</span></label>
+      <label class="pay-amount-label">Store URL <span style="color:#D72C0D">*</span></label>
       <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="var paypalShop=document.getElementById('paypalShop'); if (paypalShop) paypalShop.value=this.value; var shopifyBilling=document.getElementById('btnShopifyBilling'); if (shopifyBilling) shopifyBilling.href='/shopify/billing/approve?shop=' + encodeURIComponent(this.value)" />
     </div>
     <div class="modal-features">
