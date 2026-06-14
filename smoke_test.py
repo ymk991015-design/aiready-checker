@@ -241,6 +241,10 @@ def test_shopify_billing(mod):
     assert_true(rejected.get_json().get("redirect") == "/install?shop=demo.myshopify.com&force=1", "billing reconnect redirect missing")
 
     mod.mark_shop_paid("demo.myshopify.com", "shopify_subscription:gid://shopify/AppSubscription/1")
+    paid_upgrade = client.get("/app?shop=demo.myshopify.com&upgrade=1").get_data(as_text=True)
+    assert_true('<body class="paywall-open">' not in paid_upgrade, "paid Shopify app opened the upgrade modal on load")
+    assert_true('<div class="modal-overlay visible" id="upgradeModal">' not in paid_upgrade, "paid Shopify app rendered a visible upgrade modal")
+    assert_true('<div class="page-title">AI Readiness Scanner</div>' in paid_upgrade, "paid Shopify app still rendered upgrade page title")
 
     class GraphQLResp:
         status_code = 200

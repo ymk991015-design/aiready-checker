@@ -1596,6 +1596,21 @@ async function refreshPlanStatus(shop) {
   }
 }
 
+async function shouldAutoOpenUpgrade(shop) {
+  var normalizedShop = (shop || getPaywallShop() || '').trim();
+  if (!normalizedShop) return true;
+  try {
+    var res = await appFetch('/api/usage?shop=' + encodeURIComponent(normalizedShop));
+    var usage = await res.json();
+    if (res.ok && usage && usage.paid) {
+      closeUpgradeModal();
+      refreshPlanStatus(usage.shop || normalizedShop);
+      return false;
+    }
+  } catch (e) {}
+  return true;
+}
+
 async function cancelShopifySubscription(shop, button) {
   var normalizedShop = (shop || getPaywallShop() || '').trim();
   if (!normalizedShop) {
@@ -2533,7 +2548,10 @@ function initPaywallApp() {
     if (shop && storeInput) storeInput.value = shop;
   }
   if (isPaywall) {
-    showUpgradeModal(shop || (storeInput && storeInput.value.trim()) || '');
+    var paywallShop = shop || (storeInput && storeInput.value.trim()) || '';
+    shouldAutoOpenUpgrade(paywallShop).then(function(open) {
+      if (open) showUpgradeModal(paywallShop);
+    });
   }
 }
 function bootApp() {
@@ -3527,6 +3545,8 @@ def _render_app_page(open_upgrade=False, shop_prefill='', url_param='', shopify_
         or (normalized_prefill and is_valid_shop(normalized_prefill))
         or request.args.get('host')
     )
+    if open_upgrade and normalized_prefill and is_valid_shop(normalized_prefill) and is_paid(normalized_prefill):
+        open_upgrade = False
     return render_template_string(
         HTML_TEMPLATE,
         prefill_url=url_param,
