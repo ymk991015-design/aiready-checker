@@ -1505,7 +1505,7 @@ function jsArg(value) {
 function formatBillingDate(value) {
   if (!value) return '';
   try {
-    return new Date(value).toLocaleDateString(undefined, {year: 'numeric', month: 'short', day: 'numeric'});
+    return new Date(value).toLocaleDateString('en-US', {year: 'numeric', month: 'short', day: 'numeric'});
   } catch (e) {
     return String(value).slice(0, 10);
   }
@@ -1686,14 +1686,16 @@ window.renderResults = function renderResults(data) {
       const el = document.getElementById('usageBadge');
       if (!el) return;
       if (u.paid) {
-        el.innerHTML = '<span class="usage-badge paid">&#10003; Unlimited plan active &mdash; <a href="#" onclick="showUpgradeModal(' + jsArg(s.store) + ');return false;" style="color:var(--green);text-decoration:underline;">Manage plan</a></span>';
+        el.innerHTML = '';
+        el.style.display = 'none';
       } else {
         const limit = u.free_product_limit || 20;
+        el.style.display = 'block';
         el.innerHTML = `<span class="usage-badge">Free scan: up to ${limit} products &mdash; <a href="#" onclick="showUpgradeModal(${jsArg(s.store)});return false;" style="color:var(--yellow);text-decoration:underline;">View plan</a></span>`;
       }
     }).catch(() => {});
 
-  let html = `<div id="usageBadge" style="margin-bottom:12px;"></div>
+  let html = `<div id="usageBadge" style="display:none;margin-bottom:12px;"></div>
   <div class="metrics">
     <div class="metric-card">
       <div class="metric-value">${s.total_products}</div>
@@ -2507,8 +2509,8 @@ function initPaywallApp() {
     shop = shop || '';
     var banner = document.getElementById('unlimitedBanner');
     if (banner) {
-      banner.style.display = 'block';
-      banner.innerHTML = '&#10003; <strong>Unlimited plan active</strong> &mdash; unlimited AI fixes for ' + (shop ? escapeHtml(shop) : 'your store') + ' <a href="#" onclick="showUpgradeModal(' + jsArg(shop) + ');return false;" style="margin-left:10px;color:#005E45;text-decoration:underline;">Manage plan</a>';
+      banner.style.display = 'none';
+      banner.innerHTML = '';
     }
     if (shop && storeInput) {
       storeInput.value = shop;
