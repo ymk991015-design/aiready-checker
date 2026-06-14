@@ -1284,10 +1284,18 @@ async function refreshBillingMode(shop) {
   if (shop) {
     try {
       var res = await appFetch('/api/usage?shop=' + encodeURIComponent(shop));
-      usage = await res.json();
+      usage = cacheBillingUsage(await res.json(), shop);
       useShopify = useShopify || !!usage.has_token;
     } catch(e) {}
   }
+  if (usage && usage.paid) {
+    renderPaidBillingMode(usage.shop || shop, usage);
+    return;
+  }
+  renderUpgradeBillingMode(useShopify);
+}
+
+function renderPaidBillingMode(shop, usage) {
   var planBox = document.getElementById('modalPlanManager');
   var step1 = document.getElementById('modalStep1');
   var icon = document.querySelector('#upgradeModal .modal-icon');
@@ -1297,22 +1305,43 @@ async function refreshBillingMode(shop) {
   var priceSub = document.getElementById('billingSubtitle');
   var features = document.querySelector('#upgradeModal .modal-features');
   var storeRow = document.querySelector('#upgradeModal .pay-store-row');
-  if (usage && usage.paid) {
-    if (icon) icon.innerHTML = '&#10003;';
-    if (title) title.textContent = 'Manage subscription';
-    if (sub) sub.textContent = 'Your Shopify Billing plan is active. You can keep using AiReady Unlimited or switch back to the free plan.';
-    if (price) price.classList.add('is-hidden');
-    if (priceSub) priceSub.classList.add('is-hidden');
-    if (features) features.classList.add('is-hidden');
-    if (storeRow) storeRow.classList.add('is-hidden');
-    if (planBox) {
-      planBox.innerHTML = billingPlanManagementHtml(usage.shop || shop, usage);
-      planBox.style.display = 'block';
-    }
-    if (step1) step1.style.display = 'none';
-    setBillingMode(true);
-    return;
+  if (icon) icon.innerHTML = '&#10003;';
+  if (title) title.textContent = 'Manage subscription';
+  if (sub) sub.textContent = 'Your Shopify Billing plan is active. You can keep using AiReady Unlimited or switch back to the free plan.';
+  if (price) price.classList.add('is-hidden');
+  if (priceSub) priceSub.classList.add('is-hidden');
+  if (features) features.classList.add('is-hidden');
+  if (storeRow) storeRow.classList.add('is-hidden');
+  if (planBox) {
+    planBox.innerHTML = billingPlanManagementHtml((usage && usage.shop) || shop, usage || {});
+    planBox.style.display = 'block';
   }
+  if (step1) step1.style.display = 'none';
+  setBillingMode(true);
+}
+
+function renderBillingCheckMode(shop) {
+  renderPaidBillingMode(shop, {shop: shop, current_period_end: ''});
+  var title = document.querySelector('#upgradeModal .modal-title');
+  var sub = document.querySelector('#upgradeModal .modal-sub');
+  var planBox = document.getElementById('modalPlanManager');
+  if (title) title.textContent = 'Checking plan';
+  if (sub) sub.textContent = 'Checking your Shopify Billing status.';
+  if (planBox) {
+    planBox.innerHTML = '<div class="plan-manager modal-plan-manager"><div><div class="plan-manager-title">Checking subscription...</div><div class="plan-manager-copy">This should only take a moment.</div></div></div>';
+  }
+}
+
+function renderUpgradeBillingMode(useShopify) {
+  var planBox = document.getElementById('modalPlanManager');
+  var step1 = document.getElementById('modalStep1');
+  var icon = document.querySelector('#upgradeModal .modal-icon');
+  var title = document.querySelector('#upgradeModal .modal-title');
+  var sub = document.querySelector('#upgradeModal .modal-sub');
+  var price = document.querySelector('#upgradeModal .modal-price');
+  var priceSub = document.getElementById('billingSubtitle');
+  var features = document.querySelector('#upgradeModal .modal-features');
+  var storeRow = document.querySelector('#upgradeModal .pay-store-row');
   if (icon) icon.innerHTML = '&#128274;';
   if (title) title.textContent = 'Upgrade to Unlimited';
   if (sub) sub.textContent = useShopify
@@ -1329,13 +1358,26 @@ async function refreshBillingMode(shop) {
   if (step1) step1.style.display = 'block';
   setBillingMode(useShopify);
 }
-function showUpgradeModal(shop) {
+function showUpgradeModal(shop, mode) {
   var modal = document.getElementById('upgradeModal');
   if (!modal) return;
+  var selectedShop = shop || getPaywallShop();
   var shopInput = document.getElementById('paypalShop');
-  if (shopInput) shopInput.value = shop || '';
+  if (shopInput) shopInput.value = selectedShop || '';
   var storeUrl = document.getElementById('upgradeStoreUrl');
-  if (storeUrl && shop) storeUrl.value = shop;
+  if (storeUrl && selectedShop) storeUrl.value = selectedShop;
+  var cachedUsage = getCachedBillingUsage(selectedShop);
+  if (mode === 'manage') {
+    if (cachedUsage && cachedUsage.paid) {
+      renderPaidBillingMode(cachedUsage.shop || selectedShop, cachedUsage);
+    } else {
+      renderBillingCheckMode(selectedShop);
+    }
+    refreshBillingMode(selectedShop);
+    modal.classList.add('visible');
+    document.body.classList.add('paywall-open');
+    return;
+  }
   var fromPricing = new URLSearchParams(window.location.search).get('upgrade') === '1'
     || window.location.pathname === '/upgrade';
   var title = document.querySelector('#upgradeModal .modal-title');
@@ -1353,7 +1395,7 @@ function showUpgradeModal(shop) {
   var step2 = document.getElementById('modalStep2');
   if (step1) step1.style.display = 'block';
   if (step2) step2.style.display = 'none';
-  refreshBillingMode(shop || getPaywallShop());
+  refreshBillingMode(selectedShop);
   modal.classList.add('visible');
   document.body.classList.add('paywall-open');
 }
@@ -1482,6 +1524,7 @@ const FIX_HINTS = {
 
 var lastData = null;
 window.currentShopHasToken = false;
+window.billingUsageCache = window.billingUsageCache || {};
 
 function scoreClass(s) {
   if (s >= 70) return 'score-high';
@@ -1500,6 +1543,20 @@ function escapeHtml(value) {
 
 function jsArg(value) {
   return escapeHtml(JSON.stringify(value == null ? '' : value));
+}
+
+function usageCacheKey(shop) {
+  return String(shop || '').trim().toLowerCase();
+}
+
+function cacheBillingUsage(usage, fallbackShop) {
+  var key = usageCacheKey((usage && usage.shop) || fallbackShop || '');
+  if (key && usage) window.billingUsageCache[key] = usage;
+  return usage;
+}
+
+function getCachedBillingUsage(shop) {
+  return window.billingUsageCache[usageCacheKey(shop)] || null;
 }
 
 function formatBillingDate(value) {
@@ -1523,7 +1580,7 @@ function planManagerHtml(shop, usage) {
         <div class="plan-manager-copy">$${escapeHtml('{{ shopify_monthly_price }}')} per month through Shopify Billing for ${safeShop}.${periodCopy}</div>
       </div>
       <div class="plan-actions">
-        <button type="button" class="btn-secondary" onclick="showUpgradeModal(${shopArg})">Manage plan</button>
+        <button type="button" class="btn-secondary" onclick="showUpgradeModal(${shopArg}, 'manage')">Manage plan</button>
       </div>
       <div class="plan-message" id="planMessage-${escapeHtml((shop || '').replace(/[^a-z0-9]/gi, '-'))}"></div>
     </div>`;
@@ -1582,7 +1639,7 @@ async function refreshPlanStatus(shop) {
   }
   try {
     var res = await appFetch('/api/usage?shop=' + encodeURIComponent(normalizedShop));
-    var usage = await res.json();
+    var usage = cacheBillingUsage(await res.json(), normalizedShop);
     if (!res.ok || usage.error) {
       card.style.display = 'none';
       card.innerHTML = '';
