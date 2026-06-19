@@ -1,0 +1,2 @@
+email,store,contact_name,segment,product_count_estimate,visible_issue,score,top_issues,source,status,notes
+owner@example.com,examplestore.myshopify.com,Sarah,100+ SKU brand,150,Many products appear to miss material or review data,62,"Aggregate Rating; Material; GTIN",cold_email,new,Replace this sample before sending

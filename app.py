@@ -187,6 +187,20 @@ def init_db():
         total_products INTEGER DEFAULT 0,
         created_at {now_type}
     )''')
+    db_execute(f'''CREATE TABLE IF NOT EXISTS visit_events (
+        id {id_type},
+        path TEXT DEFAULT '',
+        source TEXT DEFAULT '',
+        shop TEXT DEFAULT '',
+        created_at {now_type}
+    )''')
+    db_execute(f'''CREATE TABLE IF NOT EXISTS upgrade_events (
+        id {id_type},
+        shop TEXT DEFAULT '',
+        source TEXT DEFAULT '',
+        action TEXT DEFAULT '',
+        created_at {now_type}
+    )''')
 
 def is_paid(shop):
     row = db_execute('SELECT 1 FROM paid_shops WHERE shop=?', (shop,), fetchone=True)
@@ -256,6 +270,27 @@ def record_lead_event(email, shop, source, avg_score, total_products):
             int(total_products or 0),
         )
     )
+
+def record_visit_event(path, source='', shop=''):
+    try:
+        db_execute(
+            '''INSERT INTO visit_events (path, source, shop)
+               VALUES (?, ?, ?)''',
+            ((path or '')[:120], clean_source(source), normalize_shop(shop)[:255])
+        )
+    except Exception as exc:
+        app.logger.debug('Failed to record visit event: %s', exc)
+
+def record_upgrade_event(shop='', source='', action='upgrade_modal'):
+    try:
+        action = re.sub(r'[^a-zA-Z0-9_.:-]', '', action or 'upgrade_modal')[:80]
+        db_execute(
+            '''INSERT INTO upgrade_events (shop, source, action)
+               VALUES (?, ?, ?)''',
+            (normalize_shop(shop)[:255], clean_source(source), action)
+        )
+    except Exception as exc:
+        app.logger.debug('Failed to record upgrade event: %s', exc)
 
 def lead_priority(avg_score, total_products, paid):
     score = 0
@@ -1358,6 +1393,18 @@ function renderUpgradeBillingMode(useShopify) {
   if (step1) step1.style.display = 'block';
   setBillingMode(useShopify);
 }
+function trackUpgradeIntent(shop, action) {
+  try {
+    var params = new URLSearchParams(window.location.search);
+    var source = params.get('source') || params.get('utm_source') || params.get('ref') || '';
+    fetch('/track/upgrade', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({shop: shop || getPaywallShop(), source: source, action: action || 'upgrade_modal'}),
+      keepalive: true
+    }).catch(function(){});
+  } catch (e) {}
+}
 function showUpgradeModal(shop, mode) {
   var modal = document.getElementById('upgradeModal');
   if (!modal) return;
@@ -1368,6 +1415,7 @@ function showUpgradeModal(shop, mode) {
   if (storeUrl && selectedShop) storeUrl.value = selectedShop;
   var cachedUsage = getCachedBillingUsage(selectedShop);
   if (mode === 'manage') {
+    trackUpgradeIntent(selectedShop, 'manage_plan');
     if (cachedUsage && cachedUsage.paid) {
       renderPaidBillingMode(cachedUsage.shop || selectedShop, cachedUsage);
     } else {
@@ -1380,6 +1428,7 @@ function showUpgradeModal(shop, mode) {
   }
   var fromPricing = new URLSearchParams(window.location.search).get('upgrade') === '1'
     || window.location.pathname === '/upgrade';
+  trackUpgradeIntent(selectedShop, fromPricing ? 'upgrade_page' : 'upgrade_modal');
   var title = document.querySelector('#upgradeModal .modal-title');
   var sub = document.querySelector('#upgradeModal .modal-sub');
   if (title && sub) {
@@ -3593,6 +3642,7 @@ def terms():
 def index():
     if request.args.get('host') or request.args.get('shop'):
         return redirect('/app?' + urlencode(request.args))
+    record_visit_event('/', request.args.get('source') or request.args.get('utm_source') or request.args.get('ref') or '')
     return render_template_string(LANDING_TEMPLATE)
 
 def _render_app_page(open_upgrade=False, shop_prefill='', url_param='', shopify_app_context=False):
@@ -3622,6 +3672,7 @@ def _render_app_page(open_upgrade=False, shop_prefill='', url_param='', shopify_
 @app.route('/upgrade')
 def upgrade_page():
     shop = normalize_shop(request.args.get('shop', session.get('shop', '')))
+    record_visit_event('/upgrade', request.args.get('source') or request.args.get('utm_source') or request.args.get('ref') or '', shop)
     return _render_app_page(
         open_upgrade=True,
         shop_prefill=shop,
@@ -3634,6 +3685,7 @@ def app_page():
     url_param = request.args.get('url', '')
     open_upgrade = request.args.get('upgrade') == '1'
     shop_prefill = normalize_shop(request.args.get('shop', session.get('shop', '')))
+    record_visit_event('/app', request.args.get('source') or request.args.get('utm_source') or request.args.get('ref') or '', shop_prefill or url_param)
     if shop_prefill and is_valid_shop(shop_prefill) and not has_shop_token(shop_prefill):
         install_params = {'shop': shop_prefill}
         host = request.args.get('host', '')
@@ -3656,6 +3708,17 @@ def session_token_check():
     if shop:
         session['shop'] = shop
     return jsonify({'ok': True, 'shop': shop})
+
+
+@app.route('/track/upgrade', methods=['POST'])
+def track_upgrade():
+    data = request.get_json(silent=True) or {}
+    record_upgrade_event(
+        data.get('shop', request.args.get('shop', session.get('shop', ''))),
+        data.get('source', request.args.get('source') or request.args.get('utm_source') or request.args.get('ref') or ''),
+        data.get('action', 'upgrade_modal'),
+    )
+    return jsonify({'ok': True})
 
 @app.route('/scan', methods=['POST'])
 def scan():
@@ -3931,7 +3994,9 @@ def create_shopify_billing_confirmation(shop):
 @app.route('/shopify/billing/start', methods=['POST'])
 def shopify_billing_start():
     data = request.get_json() or {}
-    payload = create_shopify_billing_confirmation(data.get('shop', session.get('shop', '')))
+    shop = data.get('shop', session.get('shop', ''))
+    record_upgrade_event(shop, data.get('source', ''), 'billing_start')
+    payload = create_shopify_billing_confirmation(shop)
     status = payload.pop('status', 200)
     return jsonify(payload), status
 
@@ -4022,6 +4087,7 @@ def shopify_billing_cancel():
 @app.route('/shopify/billing/approve')
 def shopify_billing_approve():
     shop = normalize_shop(request.args.get('shop', session.get('shop', '')))
+    record_upgrade_event(shop, request.args.get('source') or request.args.get('utm_source') or request.args.get('ref') or '', 'billing_approve')
     payload = create_shopify_billing_confirmation(shop)
     if payload.get('confirmationUrl'):
         return redirect(payload['confirmationUrl'])
@@ -4435,13 +4501,24 @@ def admin_metrics():
 
     total_scans = db_execute('SELECT COUNT(*) FROM scan_events', fetchone=True)[0]
     unique_scanned_shops = db_execute('SELECT COUNT(DISTINCT shop) FROM scan_events', fetchone=True)[0]
+    total_visits = db_execute('SELECT COUNT(*) FROM visit_events', fetchone=True)[0]
+    unique_visit_shops = db_execute("SELECT COUNT(DISTINCT shop) FROM visit_events WHERE shop<>''", fetchone=True)[0]
     total_leads = db_execute('SELECT COUNT(*) FROM subscriptions', fetchone=True)[0]
     unique_lead_shops = db_execute('SELECT COUNT(DISTINCT shop) FROM subscriptions', fetchone=True)[0]
     paid_shops = db_execute('SELECT COUNT(*) FROM paid_shops', fetchone=True)[0]
     pending_unlocks = db_execute('SELECT COUNT(*) FROM unlock_requests', fetchone=True)[0]
     suppressed_emails = db_execute('SELECT COUNT(*) FROM email_suppression', fetchone=True)[0]
     total_lead_events = db_execute('SELECT COUNT(*) FROM lead_events', fetchone=True)[0]
+    upgrade_clicks = db_execute("SELECT COUNT(*) FROM upgrade_events WHERE action<>'manage_plan'", fetchone=True)[0]
+    plan_manage_clicks = db_execute("SELECT COUNT(*) FROM upgrade_events WHERE action='manage_plan'", fetchone=True)[0]
 
+    top_visit_sources = db_execute('''
+        SELECT COALESCE(NULLIF(source, ''), 'direct') AS source, COUNT(*) AS visits
+        FROM visit_events
+        GROUP BY COALESCE(NULLIF(source, ''), 'direct')
+        ORDER BY visits DESC
+        LIMIT 10
+    ''', fetchall=True)
     top_sources = db_execute('''
         SELECT COALESCE(NULLIF(source, ''), 'direct') AS source, COUNT(*) AS scans
         FROM scan_events
@@ -4454,6 +4531,14 @@ def admin_metrics():
         FROM lead_events
         GROUP BY COALESCE(NULLIF(source, ''), 'direct')
         ORDER BY leads DESC
+        LIMIT 10
+    ''', fetchall=True)
+    top_upgrade_sources = db_execute('''
+        SELECT COALESCE(NULLIF(source, ''), 'direct') AS source, COUNT(*) AS clicks
+        FROM upgrade_events
+        WHERE action<>'manage_plan'
+        GROUP BY COALESCE(NULLIF(source, ''), 'direct')
+        ORDER BY clicks DESC
         LIMIT 10
     ''', fetchall=True)
     recent_scans = db_execute('''
@@ -4474,19 +4559,25 @@ def admin_metrics():
 
     return jsonify({
         'summary': {
+            'total_visits': total_visits,
+            'unique_visit_shops': unique_visit_shops,
             'total_scans': total_scans,
             'unique_scanned_shops': unique_scanned_shops,
             'total_leads': total_leads,
             'total_lead_events': total_lead_events,
             'unique_lead_shops': unique_lead_shops,
+            'upgrade_clicks': upgrade_clicks,
+            'plan_manage_clicks': plan_manage_clicks,
             'paid_shops': paid_shops,
             'pending_unlocks': pending_unlocks,
             'suppressed_emails': suppressed_emails,
             'lead_rate_percent': lead_rate,
             'paid_shop_rate_percent': paid_rate,
         },
+        'top_visit_sources': [{'source': r[0], 'visits': r[1]} for r in top_visit_sources],
         'top_sources': [{'source': r[0], 'scans': r[1]} for r in top_sources],
         'top_lead_sources': [{'source': r[0], 'leads': r[1]} for r in top_lead_sources],
+        'top_upgrade_sources': [{'source': r[0], 'clicks': r[1]} for r in top_upgrade_sources],
         'recent_scans': [
             {'shop': r[0], 'source': r[1] or 'direct', 'avg_score': r[2], 'total_products': r[3], 'created_at': r[4]}
             for r in recent_scans

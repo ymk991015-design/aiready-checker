@@ -1,0 +1,10 @@
+campaign,ad_group,keyword,match_type,max_cpc_usd,final_url,notes
+AiReady Search,AI SEO,"Shopify AI SEO",phrase,1.50,https://aiready-checker.onrender.com/?utm_source=google_ads,High intent
+AiReady Search,AI SEO,"AI product description Shopify",phrase,1.50,https://aiready-checker.onrender.com/?utm_source=google_ads,High intent
+AiReady Search,SEO App,"Shopify SEO app",phrase,1.25,https://aiready-checker.onrender.com/?utm_source=google_ads,Broader but relevant
+AiReady Search,Product Content,"Shopify product description AI",phrase,1.50,https://aiready-checker.onrender.com/?utm_source=google_ads,Content generation intent
+AiReady Search,Structured Data,"Shopify structured data",phrase,1.25,https://aiready-checker.onrender.com/?utm_source=google_ads,Technical SEO intent
+AiReady Search,Negative,"free website builder",negative,0,,Avoid low-intent searches
+AiReady Search,Negative,"jobs",negative,0,,Avoid hiring traffic
+AiReady Search,Negative,"course",negative,0,,Avoid education traffic
+AiReady Search,Negative,"theme",negative,0,,Avoid theme buyers

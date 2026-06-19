@@ -2,6 +2,14 @@
 
 Use source links to track which customer acquisition channel creates scans, leads, and paid shops.
 
+The executable 14-day acquisition workspace is in `growth/`.
+
+- `growth/lead_research.csv`: daily target stores and outreach status.
+- `growth/content_calendar.csv`: one low-hype community post per day.
+- `growth/google_ads_keywords.csv`: $100 Google Search test keywords and negatives.
+- `growth/daily_metrics.csv`: daily KPI log.
+- `growth/fetch_metrics.py`: pulls `/admin/metrics` into the KPI log.
+
 ## Source Links
 
 Cold email:
@@ -16,6 +24,12 @@ Reddit:
 https://aiready-checker.onrender.com/app?source=reddit
 ```
 
+Community:
+
+```text
+https://aiready-checker.onrender.com/app?source=community
+```
+
 Shopify agency outreach:
 
 ```text
@@ -26,6 +40,12 @@ Partner or manual demo:
 
 ```text
 https://aiready-checker.onrender.com/app?source=demo
+```
+
+Google Ads:
+
+```text
+https://aiready-checker.onrender.com/?utm_source=google_ads
 ```
 
 The app also accepts:
