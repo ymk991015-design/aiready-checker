@@ -1,6 +1,6 @@
 # AiReady Growth Tracking
 
-Use source links to track which customer acquisition channel creates scans, leads, and paid shops.
+Use source links to track which customer acquisition channel creates visits, scans, installs, repair drafts, saved fixes, checkout starts, and paid shops.
 
 The executable 14-day acquisition workspace is in `growth/`.
 
@@ -67,17 +67,29 @@ Invoke-RestMethod "https://aiready-checker.onrender.com/admin/metrics" -Headers 
 The response includes:
 
 - total scans
+- completed scans
+- failed scans
 - unique scanned shops
 - email leads
+- app installs
+- app uninstalls
+- repair drafts generated
+- descriptions saved to Shopify
+- upgrade clicks
+- checkout starts
+- checkout completions
+- subscription cancellations
 - paid shops
 - pending unlock requests
 - suppressed or unsubscribed emails
 - lead rate
 - paid shop rate
-- top scan sources
+- top visit and scan sources
 - top email lead sources
+- app event counts
 - recent scans
 - recent leads
+- recent app events
 
 ## Lead Follow-Up List
 
@@ -106,8 +118,12 @@ Lead priority:
 For the first 100 visitors, track:
 
 - Scan rate: how many visitors actually scan a store.
+- Scan failure rate: whether stores are blocked by product access, token, or scraping issues.
 - Lead rate: how many scanned stores leave an email.
-- Upgrade rate: how many scanned stores pay.
+- Install rate: how many scanners connect the Shopify app.
+- Repair draft rate: how many installed stores generate at least one draft.
+- Save rate: how many stores save a repair back to Shopify.
+- Upgrade rate: how many scanned or installed stores start checkout and pay.
 - Best source: which source creates the most scans and emails.
 - Best lead source: prioritize channels in `top_lead_sources`, not only `top_sources`.
 - Unsubscribe count: if this rises quickly, the outreach audience or message is wrong.

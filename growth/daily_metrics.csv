@@ -1,2 +1,2 @@
-date,visitors,scans,unique_scanned_shops,email_leads,installs,upgrade_clicks,paid_shops,top_source,notes
-2026-06-19,0,0,0,0,0,0,0,,Launch baseline
+date,visitors,scans,scan_completed,scan_failed,unique_scanned_shops,email_leads,installs,uninstalls,descriptions_generated,descriptions_saved,upgrade_clicks,checkout_started,checkout_completed,subscription_cancelled,paid_shops,top_source,notes
+2026-06-19,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,Launch baseline

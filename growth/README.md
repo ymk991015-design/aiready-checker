@@ -8,6 +8,7 @@ Targets by day 14:
 - 30 scans
 - 5 installs
 - 1 paid shop or clear paid intent
+- Clear evidence that merchants generate repair drafts or save fixes
 
 ## Daily routine
 
@@ -52,6 +53,17 @@ cd "C:\Users\WwwILL\Documents\Cowork OS\AiReady\checker"
 $env:ADMIN_SECRET="your_render_admin_secret"
 python growth\fetch_metrics.py
 ```
+
+The metrics export now tracks the full funnel:
+
+- visitors
+- scans, completed scans, failed scans
+- installs and uninstalls
+- repair drafts generated
+- descriptions saved to Shopify
+- upgrade clicks
+- Shopify Billing checkout starts and completions
+- subscription cancellations
 
 ## Stop rules
 

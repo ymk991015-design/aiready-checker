@@ -69,6 +69,11 @@ def handle_server_error(error):
     if request.path == '/scan':
         original = getattr(error, 'original_exception', None)
         app.logger.error('Scan failed with server error: %s', original or error)
+        try:
+            payload = request.get_json(silent=True) or {}
+            record_app_event('scan_failed', payload.get('url', ''), payload.get('source', ''), {'reason': 'server_error'})
+        except Exception:
+            pass
         return jsonify({
             'error': 'Temporary server error while scanning this store. Please reopen AiReady from Shopify Admin and try again.',
         }), 500
@@ -201,6 +206,14 @@ def init_db():
         action TEXT DEFAULT '',
         created_at {now_type}
     )''')
+    db_execute(f'''CREATE TABLE IF NOT EXISTS app_events (
+        id {id_type},
+        event_name TEXT NOT NULL,
+        shop TEXT DEFAULT '',
+        source TEXT DEFAULT '',
+        details TEXT DEFAULT '',
+        created_at {now_type}
+    )''')
 
 def is_paid(shop):
     row = db_execute('SELECT 1 FROM paid_shops WHERE shop=?', (shop,), fetchone=True)
@@ -292,6 +305,25 @@ def record_upgrade_event(shop='', source='', action='upgrade_modal'):
     except Exception as exc:
         app.logger.debug('Failed to record upgrade event: %s', exc)
 
+def record_app_event(event_name, shop='', source='', details=None):
+    try:
+        event_name = re.sub(r'[^a-zA-Z0-9_.:-]', '', event_name or '')[:80]
+        if not event_name:
+            return
+        shop_value = re.sub(r'^https?://', '', (shop or '').strip().lower()).split('/')[0][:255]
+        if shop_value.endswith('.myshopify.com'):
+            shop_value = normalize_shop(shop_value)[:255]
+        detail_text = ''
+        if details:
+            detail_text = json.dumps(details, ensure_ascii=True, sort_keys=True)[:1000]
+        db_execute(
+            '''INSERT INTO app_events (event_name, shop, source, details)
+               VALUES (?, ?, ?, ?)''',
+            (event_name, shop_value, clean_source(source), detail_text)
+        )
+    except Exception as exc:
+        app.logger.debug('Failed to record app event: %s', exc)
+
 def lead_priority(avg_score, total_products, paid):
     score = 0
     if not paid:
@@ -346,11 +378,11 @@ def send_scan_report_email(email, shop, summary=None, products=None):
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:640px;margin:0 auto;color:#202223;">
   <div style="background:#1A1A1A;padding:18px 22px;border-radius:8px 8px 0 0;">
     <span style="color:#fff;font-size:18px;font-weight:700;">Ai<span style="color:#95BF47;">Ready</span></span>
-    <span style="color:#999;font-size:13px;margin-left:12px;">AI Readiness Report</span>
+    <span style="color:#999;font-size:13px;margin-left:12px;">Product Data Repair Report</span>
   </div>
   <div style="border:1px solid #E4E5E7;border-top:none;padding:22px;border-radius:0 0 8px 8px;">
     <h2 style="margin:0 0 6px;font-size:20px;">{safe_shop}</h2>
-    <p style="margin:0 0 20px;color:#6D7175;">Current AI visibility score</p>
+    <p style="margin:0 0 20px;color:#6D7175;">Current product data health score</p>
     <div style="font-size:38px;font-weight:800;color:{score_color};margin-bottom:18px;">{int(avg_score)}/100</div>
     <h3 style="font-size:14px;margin:0 0 8px;">Top fixes</h3>
     <ul style="margin:0 0 18px;padding-left:20px;color:#202223;">{issue_rows}</ul>
@@ -377,7 +409,7 @@ def send_scan_report_email(email, shop, summary=None, products=None):
         json={
             'from': REPORT_FROM_EMAIL,
             'to': [email],
-            'subject': f'AiReady report: {shop} scored {int(avg_score)}/100',
+            'subject': f'AiReady product data report: {shop} scored {int(avg_score)}/100',
             'html': html_body,
         },
         timeout=12
@@ -878,7 +910,7 @@ HTML_TEMPLATE = """
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>AiReady - AI Readiness Checker</title>
+  <title>AiReady - Product Data Repair for Shopify</title>
   {% if shopify_client_id %}
   <meta name="shopify-api-key" content="{{ shopify_client_id }}"/>
   <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
@@ -1132,7 +1164,7 @@ HTML_TEMPLATE = """
 
 <div class="topbar">
   <a href="/" style="text-decoration:none;"><div class="topbar-logo">Ai<span>Ready</span></div></a>
-  <div class="topbar-badge">AI Readiness Checker</div>
+  <div class="topbar-badge">Product Data Repair</div>
   <div class="topbar-links">
     <a class="topbar-link" href="/privacy">Privacy</a>
     <a class="topbar-link" href="/terms">Terms</a>
@@ -1142,8 +1174,8 @@ HTML_TEMPLATE = """
 <div class="page">
 
   <div class="page-header">
-    <div class="page-title">{% if open_upgrade %}Upgrade to Unlimited{% else %}AI Readiness Scanner{% endif %}</div>
-    <div class="page-subtitle">Check how visible your Shopify products are to AI engines like ChatGPT, Perplexity, and Gemini.</div>
+    <div class="page-title">{% if open_upgrade %}Upgrade to Unlimited Product Repairs{% else %}Product Data Repair Scanner{% endif %}</div>
+    <div class="page-subtitle">Find missing Shopify product facts, generate AI-ready descriptions, and save approved fixes.</div>
   </div>
 
   <div id="shopBanner" class="shop-banner">
@@ -1161,9 +1193,9 @@ HTML_TEMPLATE = """
   <div id="planStatusCard" style="display:none;"></div>
   <div id="unlimitedBanner" style="display:none;" class="success-banner"></div>
   <div class="feature-cards" id="featureCards">
-    <div class="fcard"><div class="fcard-icon">&#128202;</div><div><div class="fcard-title">Score every product</div><div class="fcard-desc">13 structured data fields. See what&apos;s missing and the GEO score impact.</div></div></div>
-    <div class="fcard"><div class="fcard-icon">&#129302;</div><div><div class="fcard-title">Generate GEO descriptions</div><div class="fcard-desc">One-click AI copy that ChatGPT, Perplexity &amp; Gemini can understand.</div></div></div>
-    <div class="fcard"><div class="fcard-icon">&#128279;</div><div><div class="fcard-title">Save to Shopify</div><div class="fcard-desc">Connect your store and push fixes without leaving this page.</div></div></div>
+    <div class="fcard"><div class="fcard-icon">&#128202;</div><div><div class="fcard-title">Find product gaps</div><div class="fcard-desc">Scan descriptions, brand, SKU, material, size, color, barcode, and reviews.</div></div></div>
+    <div class="fcard"><div class="fcard-icon">&#129302;</div><div><div class="fcard-title">Generate repair drafts</div><div class="fcard-desc">Create AI-ready descriptions from the product facts you already have.</div></div></div>
+    <div class="fcard"><div class="fcard-icon">&#128279;</div><div><div class="fcard-title">Save approved fixes</div><div class="fcard-desc">Review changes first, then save approved descriptions back to Shopify.</div></div></div>
   </div>
   <div id="results"></div>
 
@@ -1173,8 +1205,8 @@ HTML_TEMPLATE = """
 <div class="modal-overlay{% if open_upgrade %} visible{% endif %}" id="upgradeModal">
   <div class="modal-box">
     <div class="modal-icon">&#128274;</div>
-    <div class="modal-title">Upgrade to Unlimited</div>
-    <div class="modal-sub">{% if shopify_app_context %}Monthly Shopify billing unlocks unlimited AI fixes, descriptions, and saves for your store.{% elif open_upgrade %}One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.{% else %}Upgrade once to unlock unlimited AI fixes, descriptions, and saves for your store.{% endif %}</div>
+    <div class="modal-title">Upgrade to Unlimited Product Repairs</div>
+    <div class="modal-sub">{% if shopify_app_context %}Monthly Shopify Billing unlocks expanded scans, unlimited repair drafts, bulk fixes, and save-to-Shopify.{% elif open_upgrade %}Upgrade to unlock expanded scans, unlimited repair drafts, bulk fixes, and save-to-Shopify.{% else %}Upgrade to unlock expanded scans, unlimited repair drafts, bulk fixes, and save-to-Shopify.{% endif %}</div>
     <div class="modal-price">{% if shopify_app_context %}${{ shopify_monthly_price }}{% else %}${{ paypal_price }}{% endif %}</div>
     <div class="modal-price-sub" id="billingSubtitle">{% if shopify_app_context %}per month via Shopify billing{% else %}one-time via PayPal - unlimited forever{% endif %}</div>
     <div class="pay-store-row">
@@ -1182,10 +1214,10 @@ HTML_TEMPLATE = """
       <input type="text" id="upgradeStoreUrl" class="scan-input" placeholder="yourstore.myshopify.com" value="{{ shop_prefill or '' }}" oninput="var paypalShop=document.getElementById('paypalShop'); if (paypalShop) paypalShop.value=this.value; var shopifyBilling=document.getElementById('btnShopifyBilling'); if (shopifyBilling) shopifyBilling.href='/shopify/billing/approve?shop=' + encodeURIComponent(this.value)" />
     </div>
     <div class="modal-features">
-      <div class="modal-feature">&#10003; &nbsp; Unlimited AI description generation</div>
-      <div class="modal-feature">&#10003; &nbsp; Save directly to Shopify</div>
-      <div class="modal-feature">&#10003; &nbsp; Bulk fix all products at once</div>
-      <div class="modal-feature">&#10003; &nbsp; Weekly score reports via email</div>
+      <div class="modal-feature">&#10003; &nbsp; Expanded product data scans</div>
+      <div class="modal-feature">&#10003; &nbsp; Unlimited AI repair drafts</div>
+      <div class="modal-feature">&#10003; &nbsp; Save approved fixes to Shopify</div>
+      <div class="modal-feature">&#10003; &nbsp; Weekly product data health reports</div>
     </div>
     <div id="modalPlanManager" style="display:none;"></div>
     <div id="modalStep1">
@@ -1378,10 +1410,10 @@ function renderUpgradeBillingMode(useShopify) {
   var features = document.querySelector('#upgradeModal .modal-features');
   var storeRow = document.querySelector('#upgradeModal .pay-store-row');
   if (icon) icon.innerHTML = '&#128274;';
-  if (title) title.textContent = 'Upgrade to Unlimited';
+  if (title) title.textContent = 'Upgrade to Unlimited Product Repairs';
   if (sub) sub.textContent = useShopify
-    ? 'Monthly Shopify billing unlocks unlimited AI fixes, descriptions, and saves for your store.'
-    : 'Upgrade to scan more products and unlock unlimited AI fixes, descriptions, and saves for your store.';
+    ? 'Monthly Shopify Billing unlocks expanded scans, unlimited repair drafts, bulk fixes, and save-to-Shopify.'
+    : 'Upgrade to scan more products and unlock unlimited repair drafts, bulk fixes, and save-to-Shopify.';
   if (price) price.classList.remove('is-hidden');
   if (priceSub) priceSub.classList.remove('is-hidden');
   if (features) features.classList.remove('is-hidden');
@@ -1433,8 +1465,8 @@ function showUpgradeModal(shop, mode) {
   var sub = document.querySelector('#upgradeModal .modal-sub');
   if (title && sub) {
     if (fromPricing) {
-      title.textContent = 'Upgrade to Unlimited';
-      sub.textContent = 'One-time payment unlocks unlimited AI fixes, descriptions, and saves for your store.';
+      title.textContent = 'Upgrade to Unlimited Product Repairs';
+      sub.textContent = 'Upgrade to unlock expanded scans, unlimited repair drafts, bulk fixes, and save-to-Shopify.';
     } else {
       title.textContent = 'Manage plan';
       sub.textContent = 'Review your current plan or choose the plan that fits your store.';
@@ -1824,7 +1856,7 @@ window.renderResults = function renderResults(data) {
     </div>
     <div class="metric-card">
       <div class="metric-value ${scoreCol}">${s.avg_score}<span style="font-size:16px;font-weight:400;color:var(--text-sub)">/100</span></div>
-      <div class="metric-label">Average AI Readiness Score</div>
+      <div class="metric-label">Product data health score</div>
     </div>
     <div class="metric-card">
       <div class="metric-value metric-red">${totalIssues}</div>
@@ -1838,15 +1870,15 @@ window.renderResults = function renderResults(data) {
   html += `<div class="opportunity-card">
     <div class="opportunity-head">
       <div>
-        <div class="opportunity-title">What this scan means for your store</div>
-        <div class="opportunity-sub">Turn the score into concrete fixes merchants can understand.</div>
+        <div class="opportunity-title">Product data repair plan</div>
+        <div class="opportunity-sub">Turn missing fields into concrete fixes you can review and save.</div>
       </div>
-      <button class="btn-primary" onclick="previewFirstFix(this)">Preview 1 AI Fix</button>
+      <button class="btn-primary" onclick="previewFirstFix(this)">Preview 1 Repair</button>
     </div>
     <div class="opportunity-body">
       <div class="opportunity-stat">
         <div class="opportunity-num">${lowScoreProducts}</div>
-        <div class="opportunity-label">products need urgent AI visibility work</div>
+        <div class="opportunity-label">products need priority data repair</div>
       </div>
       <div class="opportunity-stat">
         <div class="opportunity-num">~${manualMinutes} min</div>
@@ -1854,7 +1886,7 @@ window.renderResults = function renderResults(data) {
       </div>
       <div class="opportunity-stat">
         <div class="opportunity-num">${s.top_issues.length ? escapeHtml(s.top_issues[0].field) : 'Schema'}</div>
-        <div class="opportunity-label">highest priority issue to fix first</div>
+        <div class="opportunity-label">highest priority field to repair first</div>
       </div>
     </div>
   </div>`;
@@ -1863,7 +1895,7 @@ window.renderResults = function renderResults(data) {
     html += `<div class="preview-card" id="fixPreviewCard">
       <div class="preview-head">
         <div>
-          <div class="preview-title">Free AI repair preview</div>
+          <div class="preview-title">Free product repair preview</div>
           <div class="preview-sub">See one product before and after before upgrading.</div>
         </div>
         <button class="btn-secondary" onclick="previewFirstFix(this)">Generate Preview</button>
@@ -1966,7 +1998,7 @@ window.renderResults = function renderResults(data) {
     html += `</div>
         <div class="detail-actions">
           <button class="btn-secondary" onclick="event.stopPropagation();analyzeContent(this,${jsArg(en)},${jsArg(eb)},${jsArg(ed)})">Analyze Content</button>
-          <button class="btn-primary" onclick="event.stopPropagation();generateDesc(this,${jsArg(en)},${jsArg(eb)},${jsArg(ed)},${jsArg(ml)})">Generate AI Description</button>
+          <button class="btn-primary" onclick="event.stopPropagation();generateDesc(this,${jsArg(en)},${jsArg(eb)},${jsArg(ed)},${jsArg(ml)})">Generate Repair Draft</button>
           ${hasToken && !p.vendor ? `<button class="btn-secondary" onclick="event.stopPropagation();autoFillBrand(this,${jsArg(pid)},${jsArg(en)},${jsArg(s.store)})">Auto-fill Brand</button>` : ''}
         </div>
         <div class="analyze-result" style="display:none;margin-top:12px;"></div>
@@ -2007,7 +2039,7 @@ function toggleRow(idx) {
 window.toggleRow = toggleRow;
 
 function shareScore(score, store) {
-  const text = `My Shopify store scored ${score}/100 on AI Readiness - meaning AI engines like ChatGPT and Perplexity may not be recommending my products. Check your store free: {{ app_base_url }}`;
+  const text = `My Shopify store scored ${score}/100 on product data health in AiReady. It found missing fields that may make products harder for AI shopping tools to understand. Check your store free: {{ app_base_url }}`;
   navigator.clipboard.writeText(text).then(() => {
     alert('Score text copied! Paste it anywhere to share.');
   }).catch(() => {
@@ -2021,7 +2053,7 @@ window.analyzeContent = async function analyzeContent(btn, name, brand, descript
   btn.disabled = true;
   btn.textContent = 'Analyzing...';
   resultBox.style.display = 'block';
-  resultBox.innerHTML = '<span class="spinner"></span> Running GEO content analysis...';
+  resultBox.innerHTML = '<span class="spinner"></span> Checking product description quality...';
 
   try {
     const res = await appFetch('/analyze', {
@@ -2034,7 +2066,7 @@ window.analyzeContent = async function analyzeContent(btn, name, brand, descript
       resultBox.innerHTML = `<div class="error-banner">${escapeHtml(data.error)}</div>`;
     } else {
       const sc = data.content_score >= 70 ? 'score-high' : data.content_score >= 40 ? 'score-mid' : 'score-low';
-      let html = `<div class="ai-result"><div class="ai-result-header"><span>Content GEO Analysis</span></div><div class="ai-result-body">
+      let html = `<div class="ai-result"><div class="ai-result-header"><span>Product Description Analysis</span></div><div class="ai-result-body">
         <div class="ai-score-row">
           <div><div class="ai-score-num"><span class="score-pill ${sc}">${data.content_score}/100</span></div></div>
           <div style="font-size:13px;color:var(--text-sub);align-self:center;">${data.word_count || 0} words in current description</div>
@@ -2099,7 +2131,7 @@ window.generateDesc = async function generateDesc(btn, name, brand, description,
       resultBox.innerHTML = `
         <div class="ai-result">
           <div class="ai-result-header">
-            <span>AI-Optimized Description</span>
+            <span>AI-Ready Product Description</span>
             <div style="display:flex;gap:8px;">
               <button class="btn-secondary" style="font-size:12px;padding:5px 12px;" onclick="copyText(this,this.closest('.ai-result').querySelector('.ai-result-body').textContent)">Copy</button>
               ${saveBtn}
@@ -2112,7 +2144,7 @@ window.generateDesc = async function generateDesc(btn, name, brand, description,
     resultBox.innerHTML = `<div class="error-banner">Could not connect to generation service.</div>`;
   }
   btn.disabled = false;
-  btn.textContent = 'Generate AI Description';
+  btn.textContent = 'Generate Repair Draft';
 }
 
 window.previewFirstFix = async function previewFirstFix(btn) {
@@ -2163,7 +2195,7 @@ window.previewFirstFix = async function previewFirstFix(btn) {
         <div class="preview-copy">${escapeHtml(oldText)}</div>
       </div>
       <div class="preview-box">
-        <div class="preview-box-title">After - AI optimized</div>
+        <div class="preview-box-title">After - AI-ready draft</div>
         <div class="preview-copy">${escapeHtml(data.description || '')}</div>
       </div>
     </div>
@@ -2356,7 +2388,7 @@ function downloadPDF() {
   doc.setTextColor(180, 180, 180);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text('AI Readiness Report', 40, 13);
+  doc.text('Product Data Repair Report', 40, 13);
   doc.setTextColor(150, 150, 150);
   doc.text(date, 170, 13);
 
@@ -2372,7 +2404,7 @@ function downloadPDF() {
   doc.setTextColor(109, 113, 117);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Average AI Readiness Score  |  ${s.total_products} products scanned`, 14, 58);
+  doc.text(`Product data health score  |  ${s.total_products} products scanned`, 14, 58);
 
   doc.setDrawColor(228, 229, 231);
   doc.line(14, 64, 196, 64);
@@ -2451,7 +2483,7 @@ function renderBasicResults(data) {
   var scoreCol = s.avg_score >= 70 ? 'metric-green' : (s.avg_score >= 40 ? 'metric-yellow' : 'metric-red');
   var html = '<div class="metrics">' +
     '<div class="metric-card"><div class="metric-value">' + s.total_products + '</div><div class="metric-label">Products scanned</div></div>' +
-    '<div class="metric-card"><div class="metric-value ' + scoreCol + '">' + s.avg_score + '<span style="font-size:16px;font-weight:400;color:var(--text-sub)">/100</span></div><div class="metric-label">Average AI Readiness Score</div></div>' +
+    '<div class="metric-card"><div class="metric-value ' + scoreCol + '">' + s.avg_score + '<span style="font-size:16px;font-weight:400;color:var(--text-sub)">/100</span></div><div class="metric-label">Product data health score</div></div>' +
     '<div class="metric-card"><div class="metric-value metric-red">' + totalIssues + '</div><div class="metric-label">Total missing fields</div></div></div>';
   if (s.top_issues && s.top_issues.length) {
     html += '<div class="card"><div class="card-header"><div class="card-title">Most common issues</div></div><div class="card-body">';
@@ -2488,7 +2520,7 @@ function renderBasicResults(data) {
     }
     html += '</div><div class="detail-actions">' +
       '<button type="button" class="btn-secondary btn-analyze" data-idx="' + i + '">Analyze Content</button>' +
-      '<button type="button" class="btn-primary btn-generate" data-idx="' + i + '">Generate AI Description</button>' +
+      '<button type="button" class="btn-primary btn-generate" data-idx="' + i + '">Generate Repair Draft</button>' +
       '</div><div class="analyze-result" style="display:none;margin-top:12px;"></div>' +
       '<div class="generate-result" style="display:none;margin-top:12px;"></div></td></tr>';
   }
@@ -2953,7 +2985,7 @@ def check_field(schema, field):
     return bool(str(val).strip())
 
 def score_product(schema):
-    """Calculate AI Readiness Score."""
+    """Calculate product data health score."""
     total_weight = sum(f['weight'] for f in REQUIRED_FIELDS.values())
     earned = 0
     present = []
@@ -2975,8 +3007,8 @@ LANDING_TEMPLATE = """
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>AiReady - Free GEO Scanner for Shopify | AI Readiness Score</title>
-  <meta name="description" content="Free GEO (Generative Engine Optimization) scanner for Shopify. Check your AI Readiness Score and get found by ChatGPT, Perplexity, and Gemini."/>
+  <title>AiReady - Shopify Product Data Repair Scanner</title>
+  <meta name="description" content="Scan Shopify products for missing product data, generate AI-ready description drafts, and save approved fixes back to your store."/>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -3111,10 +3143,6 @@ LANDING_TEMPLATE = """
   <div class="nav-right">
     <a href="/privacy" class="nav-link">Privacy</a>
     <a href="/terms" class="nav-link">Terms</a>
-    <button class="lang-btn" onclick="toggleLang()">
-      <span class="en">中文</span>
-      <span class="zh">English</span>
-    </button>
     <a href="/#scan-hero" class="btn-nav">
       <span class="en">Free Scan &rarr;</span>
       <span class="zh">免费扫描 &rarr;</span>
@@ -3124,11 +3152,11 @@ LANDING_TEMPLATE = """
 
 <!-- HERO -->
 <section class="hero" id="scan-hero">
-  <div class="hero-badge en">Free GEO Scanner for Shopify Stores</div>
+  <div class="hero-badge en">Free product data repair scan for Shopify stores</div>
   <div class="hero-badge zh">免费 GEO 检测工具 &mdash; 专为 Shopify 出海商家</div>
-  <h1 class="en">Is your store <em>invisible</em><br/>to ChatGPT?</h1>
+  <h1 class="en">Can AI shopping tools <em>understand</em><br/>your products?</h1>
   <h1 class="zh">你的店铺对 ChatGPT <em>隐形</em>吗？</h1>
-  <p class="hero-sub en">GEO (Generative Engine Optimization) is the new SEO. If your Shopify products lack structured data, ChatGPT, Perplexity, and Gemini won't recommend them. Get your free GEO score in 30 seconds.</p>
+  <p class="hero-sub en">AiReady scans Shopify product data for missing facts like material, size, color, barcode, reviews, and thin descriptions. Get a free repair report in 30 seconds.</p>
   <p class="hero-sub zh">GEO（生成式引擎优化）是新一代 SEO。如果你的 Shopify 产品缺少结构化数据，ChatGPT、Perplexity、Gemini 就不会推荐你的产品。30 秒免费获取你的 GEO 评分。</p>
   <form class="hero-input-row" action="/app" method="get">
     <input type="text" class="hero-input" id="heroUrl" name="url" placeholder="yourstore.myshopify.com" required />
@@ -3143,7 +3171,7 @@ LANDING_TEMPLATE = """
 
 <!-- AI LOGOS -->
 <div class="logos">
-  <div class="logos-label en">GEO-optimize for these AI engines</div>
+  <div class="logos-label en">Prepare product data for AI shopping research</div>
   <div class="logos-label zh">为以下 AI 引擎做 GEO 优化</div>
   <div class="logos-row">
     <div class="logo-item">ChatGPT</div>
@@ -3158,24 +3186,24 @@ LANDING_TEMPLATE = """
 <section class="section">
   <div class="section-label en">The Problem</div>
   <div class="section-label zh">问题所在</div>
-  <h2 class="en">GEO is the new SEO.<br/>Most Shopify stores are invisible to AI.</h2>
+  <h2 class="en">AI search needs complete product facts.<br/>Many Shopify catalogs are missing them.</h2>
   <h2 class="zh">GEO 是新一代 SEO。<br/>大多数 Shopify 店铺对 AI 引擎隐形。</h2>
-  <p class="section-sub en">When someone asks ChatGPT "what's the best yoga mat under $50", it recommends products with rich, structured data. Missing brand, material, reviews, or GTIN means your products get skipped.</p>
+  <p class="section-sub en">When product pages are thin, missing barcode data, or lack material and variant details, AI tools and search crawlers have less context to understand what each item is.</p>
   <p class="section-sub zh">当用户问 ChatGPT「50 美元内最好的瑜伽垫」，AI 会推荐拥有完整结构化数据的产品。缺少品牌、材质、评价或条形码，你的产品就会被跳过。</p>
   <div class="stat-grid">
     <div class="stat-card">
-      <div class="stat-num">58%</div>
-      <div class="stat-label en">of product searches now start on AI engines, not Google</div>
+      <div class="stat-num">13</div>
+      <div class="stat-label en">product data fields checked across every scanned item</div>
       <div class="stat-label zh">产品搜索已转移到 AI 引擎</div>
     </div>
     <div class="stat-card">
-      <div class="stat-num">73%</div>
-      <div class="stat-label en">of Shopify stores score below 50/100 on AI readiness</div>
+      <div class="stat-num">20</div>
+      <div class="stat-label en">products included in the first free scan</div>
       <div class="stat-label zh">Shopify 店铺 AI 可见性低于 50/100</div>
     </div>
     <div class="stat-card">
-      <div class="stat-num">3x</div>
-      <div class="stat-label en">more AI recommendations for stores with complete structured data</div>
+      <div class="stat-num">1</div>
+      <div class="stat-label en">review step before saving approved fixes to Shopify</div>
       <div class="stat-label zh">完整数据的店铺获得 3 倍 AI 推荐</div>
     </div>
   </div>
@@ -3188,7 +3216,7 @@ LANDING_TEMPLATE = """
   <div class="section-label zh">优化前后对比</div>
   <h2 class="en">See what a fix actually looks like</h2>
   <h2 class="zh">看看优化前后的真实差距</h2>
-  <p class="section-sub en">Same product. After filling in missing structured data fields, the AI Readiness Score jumped from 23 to 87.</p>
+  <p class="section-sub en">Same product. The repair draft adds concrete product facts that make the listing easier to understand and maintain.</p>
   <p class="section-sub zh">同一个产品，补全缺失的结构化数据字段后，AI 可见性评分从 23 跳升至 87。</p>
   <div class="ba-grid">
     <div class="ba-card ba-before">
@@ -3223,7 +3251,7 @@ LANDING_TEMPLATE = """
 <section class="section">
   <div class="section-label en">How it works</div>
   <div class="section-label zh">使用流程</div>
-  <h2 class="en">Three steps to GEO-ready products</h2>
+  <h2 class="en">Three steps to cleaner product data</h2>
   <h2 class="zh">三步提升 AI 可见性</h2>
   <div class="steps" style="margin-top:40px;">
     <div class="step">
@@ -3235,16 +3263,16 @@ LANDING_TEMPLATE = """
     </div>
     <div class="step">
       <div class="step-num">2</div>
-      <h3 class="en">Get your AI Readiness Score</h3>
+      <h3 class="en">Find missing product facts</h3>
       <h3 class="zh">获取 AI 可见性评分</h3>
-      <p class="en">We scan up to 20 products and score each one across 13 structured data fields.</p>
+      <p class="en">We scan up to 20 products and show missing fields across 13 product data checks.</p>
       <p class="zh">扫描最多 20 个产品，对 13 个结构化数据字段逐一评分。</p>
     </div>
     <div class="step">
       <div class="step-num">3</div>
-      <h3 class="en">Fix with one click</h3>
+      <h3 class="en">Review and save repairs</h3>
       <h3 class="zh">一键修复</h3>
-      <p class="en">Generate AI-optimized descriptions and save them directly to Shopify.</p>
+      <p class="en">Generate AI-ready description drafts and save approved changes directly to Shopify.</p>
       <p class="zh">生成 AI 优化描述，直接保存到 Shopify。</p>
     </div>
   </div>
@@ -3259,7 +3287,7 @@ LANDING_TEMPLATE = """
     <div class="mockup-body">
       <div class="mockup-metric-row">
         <div class="mockup-metric"><div class="mockup-metric-val">20</div><div class="mockup-metric-lbl en">Products scanned</div><div class="mockup-metric-lbl zh">已扫描产品</div></div>
-        <div class="mockup-metric"><div class="mockup-metric-val" style="color:var(--yellow);">41<span style="font-size:13px;font-weight:400;">/100</span></div><div class="mockup-metric-lbl en">Avg AI Readiness Score</div><div class="mockup-metric-lbl zh">平均 AI 可见性评分</div></div>
+        <div class="mockup-metric"><div class="mockup-metric-val" style="color:var(--yellow);">41<span style="font-size:13px;font-weight:400;">/100</span></div><div class="mockup-metric-lbl en">Product data health</div><div class="mockup-metric-lbl zh">平均 AI 可见性评分</div></div>
         <div class="mockup-metric"><div class="mockup-metric-val" style="color:var(--red);">87</div><div class="mockup-metric-lbl en">Total missing fields</div><div class="mockup-metric-lbl zh">缺失字段总数</div></div>
       </div>
       <div class="mockup-row"><span>EcoStride Yoga Mat 6mm</span><span class="pill pill-red">23/100</span></div>
@@ -3274,72 +3302,72 @@ LANDING_TEMPLATE = """
 <section class="section">
   <div class="section-label en">Features</div>
   <div class="section-label zh">功能</div>
-  <h2 class="en">Everything your store needs<br/>to win at GEO</h2>
+  <h2 class="en">Everything needed to find and repair<br/>thin product data</h2>
   <h2 class="zh">让你的店铺赢得 AI 搜索<br/>所需的一切</h2>
   <p class="section-sub en">Built specifically for Shopify &mdash; no complex setup required.</p>
   <p class="section-sub zh">专为 Shopify 打造，无需复杂配置。</p>
   <div class="features">
     <div class="feature-card">
       <div class="feature-icon">&#128202;</div>
-      <h3 class="en">AI Readiness Score</h3>
+      <h3 class="en">Product data health score</h3>
       <h3 class="zh">AI 可见性评分</h3>
-      <p class="en">Score every product 0&ndash;100 across 13 structured data fields. See exactly what's missing and how many points each fix is worth.</p>
+      <p class="en">Score every product 0&ndash;100 across 13 product data fields. See exactly what's missing and which repairs matter first.</p>
       <p class="zh">对 13 个结构化数据字段进行 0–100 评分，清楚看到缺少什么、每项修复值多少分。</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">&#129302;</div>
-      <h3 class="en">AI Description Generator</h3>
+      <h3 class="en">AI-ready repair drafts</h3>
       <h3 class="zh">AI 描述生成器</h3>
-      <p class="en">Generate GEO-optimized product descriptions in one click. Naturally includes material, color, size, and use cases &mdash; exactly what AI engines look for.</p>
+      <p class="en">Generate product description drafts that include concrete facts such as material, color, size, use cases, and variant context.</p>
       <p class="zh">一键生成 GEO 优化描述，自然包含材质、颜色、尺寸、使用场景，正是 AI 引擎需要的内容。</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">&#128279;</div>
-      <h3 class="en">Direct Shopify Integration</h3>
+      <h3 class="en">Direct Shopify saving</h3>
       <h3 class="zh">直接集成 Shopify</h3>
-      <p class="en">Connect your store via OAuth and save fixes directly to your products &mdash; no copy-pasting needed.</p>
+      <p class="en">Connect your store with Shopify OAuth and save approved description updates directly to products.</p>
       <p class="zh">通过 OAuth 连接店铺，直接保存修复结果，无需手动复制粘贴。</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">&#128336;</div>
-      <h3 class="en">Weekly Score Reports</h3>
+      <h3 class="en">Weekly product data reports</h3>
       <h3 class="zh">每周评分报告</h3>
-      <p class="en">Subscribe and get an automated weekly email showing your store's AI readiness score and what changed.</p>
+      <p class="en">Subscribe and get an automated weekly email showing your product data health score and what changed.</p>
       <p class="zh">订阅后每周自动收到邮件，显示你的店铺评分变化。</p>
     </div>
   </div>
 </section>
 </div>
 
-<!-- TESTIMONIALS -->
+<!-- USE CASES -->
 <section class="section">
-  <div class="section-label en">What store owners say</div>
+  <div class="section-label en">Best-fit stores</div>
   <div class="section-label zh">店主怎么说</div>
-  <h2 class="en">Real results from real stores</h2>
+  <h2 class="en">Built for catalogs that are hard to keep complete</h2>
   <h2 class="zh">真实店铺的真实反馈</h2>
   <div class="testi-grid" style="margin-top:40px;">
     <div class="testi-card">
-      <div class="testi-stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
-      <p class="testi-text en">"Scanned my store and found 6 products with missing brand fields. Fixed them all in 10 minutes using the bulk tool. My score went from 34 to 71."</p>
+      <div class="testi-stars">100+ SKU</div>
+      <p class="testi-text en">Large product catalogs often have inconsistent descriptions, missing vendor data, and variant details spread across many products.</p>
       <p class="testi-text zh">"扫描了我的店铺，发现 6 个产品缺少品牌字段。用批量工具 10 分钟全修好了，评分从 34 涨到了 71。"</p>
-      <div class="testi-author">Sarah K.</div>
-      <div class="testi-store en">Home &amp; Decor store, 340 products</div>
+      <div class="testi-author">Multi-product stores</div>
+      <div class="testi-store en">Apparel, beauty, home, sports, accessories</div>
       <div class="testi-store zh">家居装饰店，340 个产品</div>
     </div>
     <div class="testi-card">
-      <div class="testi-stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
-      <p class="testi-text en">"I had no idea what structured data was before this. The tool explained everything in plain language and the AI descriptions are actually good."</p>
+      <div class="testi-stars">Dropshipping</div>
+      <p class="testi-text en">Imported supplier copy can be thin, duplicated, or missing product facts that make listings easier to understand and compare.</p>
       <p class="testi-text zh">"之前完全不知道结构化数据是什么。这个工具用简单语言解释了一切，AI 生成的描述质量也很高。"</p>
-      <div class="testi-author">Marcus T.</div>
-      <div class="testi-store en">Sports &amp; Outdoors store, 120 products</div>
+      <div class="testi-author">Supplier-fed catalogs</div>
+      <div class="testi-store en">Fast-moving stores with frequent new products</div>
       <div class="testi-store zh">运动户外店，120 个产品</div>
     </div>
     <div class="testi-card">
-      <div class="testi-stars">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
-      <p class="testi-text en">"Worth the $9 just for the bulk description generator. Rewrote 18 product descriptions in one afternoon. Would have taken me a week manually."</p>
+      <div class="testi-stars">POD</div>
+      <p class="testi-text en">Print-on-demand and custom product stores need clear material, size, fit, and use-case details across many similar listings.</p>
       <p class="testi-text zh">"光是批量描述生成就值 9 美元。一个下午重写了 18 个产品描述，手动写要花一周。"</p>
-      <div class="testi-author">Linda W.</div>
-      <div class="testi-store en">Skincare brand, 85 products</div>
+      <div class="testi-author">Custom product stores</div>
+      <div class="testi-store en">POD, personalized gifts, niche apparel</div>
       <div class="testi-store zh">护肤品牌，85 个产品</div>
     </div>
   </div>
@@ -3363,7 +3391,7 @@ LANDING_TEMPLATE = """
       <div class="price-desc zh">无需信用卡</div>
       <ul class="price-features">
         <li class="en">Scan up to 20 products</li><li class="zh">扫描最多 20 个产品</li>
-        <li class="en">Full AI Readiness Score</li><li class="zh">完整 AI 评分</li>
+        <li class="en">Product data health score</li><li class="zh">完整 AI 评分</li>
         <li class="en">See missing product fields</li><li class="zh">Missing field report</li>
         <li class="en">PDF report download</li><li class="zh">PDF 报告下载</li>
       </ul>
@@ -3380,9 +3408,9 @@ LANDING_TEMPLATE = """
       <div class="price-desc zh">一次性付款，按店铺</div>
       <ul class="price-features">
         <li class="en">Everything in Free</li><li class="zh">包含所有免费功能</li>
-        <li class="en">Unlimited AI descriptions</li><li class="zh">无限次 AI 描述生成</li>
-        <li class="en">Save directly to Shopify</li><li class="zh">直接保存到 Shopify</li>
-        <li class="en">Bulk fix all products</li><li class="zh">批量修复全部产品</li>
+        <li class="en">Unlimited repair drafts</li><li class="zh">无限次 AI 描述生成</li>
+        <li class="en">Save approved fixes to Shopify</li><li class="zh">直接保存到 Shopify</li>
+        <li class="en">Bulk repair workflow</li><li class="zh">批量修复全部产品</li>
         <li class="en">Weekly email reports</li><li class="zh">每周报告邮件</li>
       </ul>
       <a href="/upgrade" class="btn-price btn-price-paid">
@@ -3403,11 +3431,11 @@ LANDING_TEMPLATE = """
   <div style="margin-top:32px;">
     <div class="faq-item">
       <div class="faq-q" onclick="toggleFaq(this)">
-        <span class="en">What is GEO and why does it matter for my Shopify store?</span>
+        <span class="en">Why does product data completeness matter?</span>
         <span class="zh">什么是 GEO，为什么对我的 Shopify 店铺重要？</span>
         <span class="faq-icon">+</span>
       </div>
-      <div class="faq-a en">GEO stands for Generative Engine Optimization. It's the practice of structuring your product data so AI engines like ChatGPT, Perplexity, and Gemini can understand and recommend your products. As more shoppers use AI to find products instead of Google, GEO is becoming as important as SEO.</div>
+      <div class="faq-a en">Complete product data gives search crawlers, storefronts, and AI shopping tools more context about what each product is, who it is for, and which facts are important to compare.</div>
       <div class="faq-a zh">GEO 是生成式引擎优化（Generative Engine Optimization）。它是指优化产品数据结构，让 ChatGPT、Perplexity、Gemini 等 AI 引擎能够理解并推荐你的产品。随着越来越多买家用 AI 替代 Google 搜索，GEO 正变得和 SEO 同样重要。</div>
     </div>
     <div class="faq-item">
@@ -3434,7 +3462,7 @@ LANDING_TEMPLATE = """
         <span class="zh">这和普通 Shopify SEO 工具有什么区别？</span>
         <span class="faq-icon">+</span>
       </div>
-      <div class="faq-a en">Traditional SEO apps focus on Google search rankings &mdash; meta titles, keywords, backlinks. AiReady focuses on AI engine visibility: structured data fields, description richness, and the specific signals that ChatGPT and Perplexity use to decide which products to recommend.</div>
+      <div class="faq-a en">Traditional SEO apps often focus on meta titles, keywords, redirects, and technical audits. AiReady focuses on product-level data gaps: missing material, barcode, brand, reviews, variant context, and thin descriptions.</div>
       <div class="faq-a zh">传统 SEO 工具专注于 Google 排名 &mdash; 标题标签、关键词、外链。AiReady 专注于 AI 引擎可见性：结构化数据字段、描述丰富度，以及 ChatGPT 和 Perplexity 决定推荐哪些产品时使用的具体信号。</div>
     </div>
     <div class="faq-item">
@@ -3451,7 +3479,7 @@ LANDING_TEMPLATE = """
 
 <!-- CTA BAND -->
 <div class="cta-band">
-  <h2 class="en">Get your free GEO score in 30 seconds</h2>
+  <h2 class="en">Get your free product data repair report in 30 seconds</h2>
   <h2 class="zh">30 秒获取你的免费 GEO 评分</h2>
   <p class="en">Free scan, no account needed.</p>
   <p class="zh">免费扫描，无需注册。</p>
@@ -3463,7 +3491,7 @@ LANDING_TEMPLATE = """
 
 <footer>
   <div class="nav-logo" style="font-size:15px;">Ai<span style="color:#95BF47;">Ready</span></div>
-  <div class="en">AI Readiness Checker for Shopify &mdash; &copy; 2025 AiReady</div>
+  <div class="en">Product Data Repair Scanner for Shopify &mdash; &copy; 2026 AiReady</div>
   <div class="zh">Shopify AI 可见性检测工具 &mdash; &copy; 2025 AiReady</div>
   <div style="display:flex;gap:16px;">
     <a href="/privacy" style="font-size:12px;color:#aaa;text-decoration:none;">Privacy Policy</a>
@@ -3713,11 +3741,15 @@ def session_token_check():
 @app.route('/track/upgrade', methods=['POST'])
 def track_upgrade():
     data = request.get_json(silent=True) or {}
+    action = data.get('action', 'upgrade_modal')
+    shop = data.get('shop', request.args.get('shop', session.get('shop', '')))
+    source = data.get('source', request.args.get('source') or request.args.get('utm_source') or request.args.get('ref') or '')
     record_upgrade_event(
-        data.get('shop', request.args.get('shop', session.get('shop', ''))),
-        data.get('source', request.args.get('source') or request.args.get('utm_source') or request.args.get('ref') or ''),
-        data.get('action', 'upgrade_modal'),
+        shop,
+        source,
+        action,
     )
+    record_app_event('paywall_viewed' if action != 'manage_plan' else 'plan_manage_viewed', shop, source, {'action': action})
     return jsonify({'ok': True})
 
 @app.route('/scan', methods=['POST'])
@@ -3726,6 +3758,7 @@ def scan():
     store_url = data.get('url', '').strip()
     source = clean_source(data.get('source', '') or request.args.get('source', ''))
     if not store_url:
+        record_app_event('scan_failed', '', source, {'reason': 'missing_url'})
         return jsonify({'error': 'Please provide a store URL.'})
     normalized_shop = normalize_shop(store_url)
     token_payload = current_shopify_session()
@@ -3735,12 +3768,15 @@ def scan():
     shopify_products = []
     product_urls = []
     if normalized_shop and is_valid_shop(normalized_shop) and not has_shop_token(normalized_shop) and session_shop == normalized_shop:
+        record_app_event('scan_failed', normalized_shop, source, {'reason': 'missing_shopify_token'})
         return jsonify({
             'error': 'Please reconnect AiReady to Shopify so it can read products from this store.',
             'redirect': f'/install?shop={normalized_shop}&force=1',
         }), 401
+    event_shop = normalized_shop if normalized_shop and is_valid_shop(normalized_shop) else store_url
     paid = bool(normalized_shop and is_valid_shop(normalized_shop) and (is_paid(normalized_shop) or sync_shopify_billing_status(normalized_shop)))
     product_limit = PAID_PRODUCT_LIMIT if paid else FREE_PRODUCT_LIMIT
+    record_app_event('scan_started', event_shop, source, {'paid': paid, 'product_limit': product_limit})
     if normalized_shop and is_valid_shop(normalized_shop) and has_shop_token(normalized_shop):
         try:
             shopify_products = fetch_shopify_admin_products(normalized_shop, limit=product_limit)
@@ -3752,10 +3788,12 @@ def scan():
         except Exception as exc:
             app.logger.warning('Falling back to storefront scan for %s: %s', normalized_shop, exc)
             if 'GraphQL 401' in str(exc) or 'GraphQL 403' in str(exc):
+                record_app_event('scan_failed', normalized_shop, source, {'reason': 'shopify_graphql_auth'})
                 return jsonify({
                     'error': 'Please reconnect AiReady to Shopify so it can read products from this store.',
                     'redirect': f'/install?shop={normalized_shop}&force=1',
                 }), 401
+            record_app_event('scan_failed', normalized_shop, source, {'reason': 'shopify_admin_read_failed'})
             return jsonify({
                 'error': 'Could not read products from Shopify Admin API. Please reopen AiReady from Shopify Admin and try again.',
                 'detail': str(exc)[:300],
@@ -3765,6 +3803,7 @@ def scan():
     if not product_urls:
         product_urls, shopify_products = get_product_urls(store_url, limit=product_limit)
     if not product_urls:
+        record_app_event('scan_failed', event_shop, source, {'reason': 'no_product_urls'})
         return jsonify({'error': 'Could not find products. Make sure the store has products available to this app.'})
     product_by_handle = {p.get('handle', ''): p for p in shopify_products if p.get('handle')}
 
@@ -3808,6 +3847,7 @@ def scan():
             raw = list(executor.map(safe_scan_one, product_urls))
     results = [r for r in raw if r is not None]
     if not results:
+        record_app_event('scan_failed', event_shop, source, {'reason': 'no_schema_extracted'})
         return jsonify({'error': 'Could not extract schema from product pages. The store may require JavaScript rendering.'})
 
     # Store-level summary
@@ -3829,6 +3869,13 @@ def scan():
     # Check if this shop has an authenticated token
     has_token = has_shop_token(normalize_shop(store_domain))
     record_scan_event(store_domain, source, avg_score, len(results))
+    record_app_event('scan_completed', store_domain, source, {
+        'avg_score': avg_score,
+        'total_products': len(results),
+        'paid': paid,
+        'has_token': has_token,
+        'top_issue': top_issues[0][0] if top_issues else '',
+    })
 
     return jsonify({
         'products': results,
@@ -3921,6 +3968,7 @@ def paypal_ipn():
                 shop = row[0]
         if shop and is_valid_shop(shop):
             mark_shop_paid(shop, txn_id or 'paypal-ipn')
+            record_app_event('checkout_completed', shop, '', {'method': 'paypal_ipn'})
     return 'OK', 200
 
 
@@ -3995,7 +4043,9 @@ def create_shopify_billing_confirmation(shop):
 def shopify_billing_start():
     data = request.get_json() or {}
     shop = data.get('shop', session.get('shop', ''))
-    record_upgrade_event(shop, data.get('source', ''), 'billing_start')
+    source = data.get('source', '')
+    record_upgrade_event(shop, source, 'billing_start')
+    record_app_event('checkout_started', shop, source, {'method': 'shopify_billing_start'})
     payload = create_shopify_billing_confirmation(shop)
     status = payload.pop('status', 200)
     return jsonify(payload), status
@@ -4049,6 +4099,7 @@ def cancel_shopify_billing_subscription(shop):
         if errors:
             return {'error': '; '.join(e.get('message', 'Billing error') for e in errors), 'status': 400}
         clear_shopify_paid(shop)
+        record_app_event('subscription_cancelled', shop, '', {'current_period_end': current_period_end})
         return {
             'success': True,
             'subscription': payload.get('appSubscription') or {},
@@ -4087,7 +4138,9 @@ def shopify_billing_cancel():
 @app.route('/shopify/billing/approve')
 def shopify_billing_approve():
     shop = normalize_shop(request.args.get('shop', session.get('shop', '')))
-    record_upgrade_event(shop, request.args.get('source') or request.args.get('utm_source') or request.args.get('ref') or '', 'billing_approve')
+    source = request.args.get('source') or request.args.get('utm_source') or request.args.get('ref') or ''
+    record_upgrade_event(shop, source, 'billing_approve')
+    record_app_event('checkout_started', shop, source, {'method': 'shopify_billing_approve'})
     payload = create_shopify_billing_confirmation(shop)
     if payload.get('confirmationUrl'):
         return redirect(payload['confirmationUrl'])
@@ -4104,7 +4157,9 @@ def shopify_billing_approve():
 def shopify_billing_return():
     shop = normalize_shop(request.args.get('shop', session.get('shop', '')))
     if shop and sync_shopify_billing_status(shop):
+        record_app_event('checkout_completed', shop, '', {'method': 'shopify_billing_return'})
         return redirect(f'/app?shop={shop}&unlocked=1')
+    record_app_event('checkout_pending', shop, '', {'method': 'shopify_billing_return'})
     return redirect(f'/upgrade?shop={shop}&billing=pending' if shop else '/upgrade?billing=pending')
 
 
@@ -4118,6 +4173,7 @@ def generate():
     shop = data.get('shop', '').strip().lower()
 
     if not DEEPSEEK_API_KEY:
+        record_app_event('description_generate_failed', shop, '', {'reason': 'missing_api_key'})
         return jsonify({'error': 'DeepSeek API key not configured.'})
 
     missing_str = ', '.join(missing) if missing else 'none identified'
@@ -4137,6 +4193,22 @@ Write a new, optimized product description that:
 - Answers the question "who is this product for and why should they buy it?"
 
 Return ONLY the description text. No labels, no JSON, no explanations."""
+    prompt = f"""You are an e-commerce product data repair assistant for Shopify merchants.
+
+Product name: {name}
+Brand: {brand}
+Current description: {description if description else '[No description provided]'}
+Missing data fields: {missing_str}
+
+Write a new AI-ready product description draft that:
+- Is 80-150 words
+- Uses only factual details provided above or clearly inferable from the product name
+- Naturally includes relevant material/fabric, color options, size info, use cases, and target audience when available
+- Avoids unverifiable claims, guarantees, exaggerated results, and generic marketing fluff
+- Mentions the brand name naturally
+- Helps a merchant repair thin or incomplete product copy before saving it to Shopify
+
+Return ONLY the description text. No labels, no JSON, no explanations."""
 
     try:
         r = requests.post(
@@ -4154,8 +4226,13 @@ Return ONLY the description text. No labels, no JSON, no explanations."""
             timeout=20
         )
         description_out = r.json()['choices'][0]['message']['content'].strip()
+        record_app_event('description_generated', shop, '', {
+            'missing_count': len(missing),
+            'input_description_chars': len(description),
+        })
         return jsonify({'description': description_out})
     except Exception as e:
+        record_app_event('description_generate_failed', shop, '', {'reason': 'api_error'})
         return jsonify({'error': f'Generation failed: {str(e)}'})
 
 
@@ -4167,6 +4244,7 @@ def analyze():
     description = (data.get('description', '') or '')[:2000]
 
     if not DEEPSEEK_API_KEY:
+        record_app_event('description_analysis_failed', '', '', {'reason': 'missing_api_key'})
         return jsonify({'error': 'DeepSeek API key not configured.'})
 
     prompt = f"""You are a GEO (Generative Engine Optimization) expert for e-commerce.
@@ -4179,6 +4257,21 @@ Description: {description if description else '[No description provided]'}
 
 Return ONLY a valid JSON object with these exact keys:
 - "content_score": integer 0-100 (how well-optimized for AI engines)
+- "word_count": integer (word count of the description)
+- "issues": array of up to 4 short strings describing problems
+- "suggestions": array of up to 4 short strings with specific improvements
+
+No explanation, no markdown, just the JSON object."""
+    prompt = f"""You are a product data quality analyst for Shopify product pages.
+
+Analyze this Shopify product description for clarity, factual completeness, and whether it gives enough concrete product context for search crawlers and AI shopping tools to understand the item.
+
+Product name: {name}
+Brand: {brand}
+Description: {description if description else '[No description provided]'}
+
+Return ONLY a valid JSON object with these exact keys:
+- "content_score": integer 0-100 (how complete and specific the product description is)
 - "word_count": integer (word count of the description)
 - "issues": array of up to 4 short strings describing problems
 - "suggestions": array of up to 4 short strings with specific improvements
@@ -4206,8 +4299,10 @@ No explanation, no markdown, just the JSON object."""
             content = re.sub(r'^```[a-z]*\n?', '', content)
             content = re.sub(r'\n?```$', '', content)
         result = json.loads(content)
+        record_app_event('description_analyzed', '', '', {'content_score': result.get('content_score', 0)})
         return jsonify(result)
     except Exception as e:
+        record_app_event('description_analysis_failed', '', '', {'reason': 'api_error'})
         return jsonify({'error': f'Analysis failed: {str(e)}'})
 
 
@@ -4277,6 +4372,7 @@ def auth_callback():
     )
     register_app_uninstalled_webhook(shop, access_token)
     session['shop'] = shop
+    record_app_event('app_installed', shop, '', {'scope': token_data.get('scope', '')})
 
     # Redirect back into the embedded app with shop param so it auto-scans
     app_home = shopify_app_home_url(request.args.get('host', ''))
@@ -4296,6 +4392,7 @@ def webhook_app_uninstalled():
             shop = (json.loads(raw_body.decode('utf-8')) or {}).get('domain', '')
         except Exception:
             shop = ''
+    record_app_event('app_uninstalled', shop, '', {})
     delete_shop_data(shop)
     return '', 200
 
@@ -4386,8 +4483,10 @@ def update_vendor():
 
     token = get_shop_token(shop)
     if not shop or not token:
+        record_app_event('description_save_failed', shop, '', {'reason': 'not_authenticated'})
         return jsonify({'error': 'Not authenticated.'}), 401
     if not product_id:
+        record_app_event('description_save_failed', shop, '', {'reason': 'missing_product_id'})
         return jsonify({'error': 'Missing product_id.'}), 400
 
     mutation = """
@@ -4445,10 +4544,13 @@ def update_product():
         )
     except Exception as exc:
         app.logger.warning('Failed to update product through GraphQL for %s: %s', shop, exc)
+        record_app_event('description_save_failed', shop, '', {'reason': 'shopify_graphql_error'})
         return jsonify({'error': 'Failed to update product.'}), 400
     errors = ((data.get('productUpdate') or {}).get('userErrors')) or []
     if errors:
+        record_app_event('description_save_failed', shop, '', {'reason': 'shopify_user_error'})
         return jsonify({'error': '; '.join(err.get('message', 'Failed to update product.') for err in errors)}), 400
+    record_app_event('description_saved_to_shopify', shop, '', {'product_id': str(product_id)[:120]})
     return jsonify({'success': True})
 
 
@@ -4511,6 +4613,13 @@ def admin_metrics():
     total_lead_events = db_execute('SELECT COUNT(*) FROM lead_events', fetchone=True)[0]
     upgrade_clicks = db_execute("SELECT COUNT(*) FROM upgrade_events WHERE action<>'manage_plan'", fetchone=True)[0]
     plan_manage_clicks = db_execute("SELECT COUNT(*) FROM upgrade_events WHERE action='manage_plan'", fetchone=True)[0]
+    event_rows = db_execute('''
+        SELECT event_name, COUNT(*) AS count
+        FROM app_events
+        GROUP BY event_name
+        ORDER BY count DESC
+    ''', fetchall=True)
+    event_counts = {r[0]: r[1] for r in event_rows}
 
     top_visit_sources = db_execute('''
         SELECT COALESCE(NULLIF(source, ''), 'direct') AS source, COUNT(*) AS visits
@@ -4553,6 +4662,12 @@ def admin_metrics():
         ORDER BY id DESC
         LIMIT 20
     ''', fetchall=True)
+    recent_app_events = db_execute('''
+        SELECT event_name, shop, source, details, created_at
+        FROM app_events
+        ORDER BY id DESC
+        LIMIT 30
+    ''', fetchall=True)
 
     lead_rate = round((total_leads / total_scans) * 100, 1) if total_scans else 0
     paid_rate = round((paid_shops / unique_scanned_shops) * 100, 1) if unique_scanned_shops else 0
@@ -4568,6 +4683,16 @@ def admin_metrics():
             'unique_lead_shops': unique_lead_shops,
             'upgrade_clicks': upgrade_clicks,
             'plan_manage_clicks': plan_manage_clicks,
+            'app_installs': event_counts.get('app_installed', 0),
+            'app_uninstalls': event_counts.get('app_uninstalled', 0),
+            'scan_started': event_counts.get('scan_started', 0),
+            'scan_completed': event_counts.get('scan_completed', 0),
+            'scan_failed': event_counts.get('scan_failed', 0),
+            'description_generated': event_counts.get('description_generated', 0),
+            'description_saved_to_shopify': event_counts.get('description_saved_to_shopify', 0),
+            'checkout_started': event_counts.get('checkout_started', 0),
+            'checkout_completed': event_counts.get('checkout_completed', 0),
+            'subscription_cancelled': event_counts.get('subscription_cancelled', 0),
             'paid_shops': paid_shops,
             'pending_unlocks': pending_unlocks,
             'suppressed_emails': suppressed_emails,
@@ -4578,6 +4703,7 @@ def admin_metrics():
         'top_sources': [{'source': r[0], 'scans': r[1]} for r in top_sources],
         'top_lead_sources': [{'source': r[0], 'leads': r[1]} for r in top_lead_sources],
         'top_upgrade_sources': [{'source': r[0], 'clicks': r[1]} for r in top_upgrade_sources],
+        'event_counts': event_counts,
         'recent_scans': [
             {'shop': r[0], 'source': r[1] or 'direct', 'avg_score': r[2], 'total_products': r[3], 'created_at': r[4]}
             for r in recent_scans
@@ -4592,6 +4718,16 @@ def admin_metrics():
                 'created_at': r[5],
             }
             for r in recent_leads
+        ],
+        'recent_app_events': [
+            {
+                'event_name': r[0],
+                'shop': r[1],
+                'source': r[2] or 'direct',
+                'details': r[3],
+                'created_at': r[4],
+            }
+            for r in recent_app_events
         ],
     })
 
@@ -4765,7 +4901,7 @@ def run_weekly_scan():
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:600px;margin:0 auto;">
   <div style="background:#1A1A1A;padding:20px 24px;border-radius:8px 8px 0 0;">
     <span style="color:#fff;font-size:18px;font-weight:700;">Ai<span style="color:#95BF47;">Ready</span></span>
-    <span style="color:#999;font-size:13px;margin-left:12px;">Weekly AI Readiness Report</span>
+    <span style="color:#999;font-size:13px;margin-left:12px;">Weekly Product Data Report</span>
   </div>
   <div style="background:#fff;border:1px solid #E4E5E7;border-top:none;padding:24px;border-radius:0 0 8px 8px;">
     <h2 style="font-size:20px;color:#202223;margin:0 0 4px;">{shop}</h2>
@@ -4798,7 +4934,7 @@ def run_weekly_scan():
                     json={
                         'from': REPORT_FROM_EMAIL,
                         'to': [email],
-                        'subject': f'Weekly AI Readiness Report: {shop} scored {avg}/100',
+                        'subject': f'Weekly product data report: {shop} scored {avg}/100',
                         'html': html_body,
                     },
                     timeout=10

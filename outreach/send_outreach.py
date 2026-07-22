@@ -59,24 +59,24 @@ def build_message(lead, default_source="cold_email"):
     greeting = f"Hi {name}," if name else "Hi,"
 
     if score:
-        opener = f"I ran a quick AI visibility scan on {store}. It scored {score}/100."
+        opener = f"I ran a quick product data scan on {store}. It scored {score}/100."
     else:
-        opener = f"I checked {store} and noticed some products may be missing fields that AI search engines use to understand products."
+        opener = f"I checked {store} and noticed some products may be missing facts that make listings easier to understand and compare."
 
     issue_text = ""
     if issues:
         issue_text = "\nMain missing fields:\n" + "\n".join(f"- {i}" for i in issues)
     else:
-        issue_text = "\nExamples include material, barcode, brand, review data, and other structured product signals."
+        issue_text = "\nExamples include material, barcode, brand, size, color, review data, and other product facts."
 
     scan_url = f"{APP_URL}/app?{urlencode({'url': store, 'source': source})}"
-    subject = f"Quick AI visibility scan for {store}"
+    subject = f"Quick product data scan for {store}"
 
     text = f"""{greeting}
 
 {opener}{issue_text}
 
-I built AiReady, a Shopify app that scans products and shows which fields may block visibility in tools like ChatGPT, Perplexity, and Gemini.
+I built AiReady, a Shopify app that scans products, shows missing product data, and drafts cleaner AI-ready descriptions for review.
 
 You can run a free scan here:
 {scan_url}
